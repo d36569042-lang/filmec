@@ -1063,6 +1063,8 @@
 
         // ==================== ЗАГРУЗКА ВИДЕО С АВТОВЫБОРОМ API ====================
         function loadVideo(url, title = '') {
+            console.log(`📺 loadVideo вызвана. isHostUser=${isHostUser}, roomHostId=${roomHostId}, currentUser.id=${currentUser.id}`);
+            
             const videoData = parseVideoUrl(url);
             if (!videoData) {
                 alert('Неподдерживаемая ссылка');
@@ -1120,7 +1122,13 @@
 
             currentVideoTitle.textContent = title || videoData.title || 'Видео';
 
-            // Обновляем в Firebase
+            // Обновляем в Firebase - ТОЛЬКО если мы хост!
+            if (!isHostUser) {
+                console.log('❌ Только ХОСТ может загружать видео');
+                addChatMessage('Система', '❌ Только хост может загружать видео', 'system');
+                return false;
+            }
+            
             if (currentUser.roomId && videoStateRef) {
                 videoStateRef.update({
                     url: url,
@@ -1187,6 +1195,12 @@
                             break;
                             
                         case 'player:changeState':
+                            // КРИТИЧНО: Только хост отправляет команды!
+                            if (!isHostUser) {
+                                console.log('❌ Я не хост - перехватываю changeState но не отправляю');
+                                return;
+                            }
+                            
                             if (message.data && (message.data.state === 'playing' || message.data.state === 'pause')) {
                                 const isPlaying = message.data.state === 'playing';
                                 rutubePlayerIsPlaying = isPlaying; // Сохраняем состояние
@@ -1209,14 +1223,13 @@
                             
                         case 'player:currentTime':
                             // Только хост обновляет текущее время
+                            // НЕ отправляем isPlaying здесь - только при changeState событии!
+                            // currentTime приходит ДО changeState, поэтому состояние будет старым
                             if (isHostUser && currentUser.roomId && videoStateRef && message.data) {
-                                // Запрашиваем реальное состояние плеера (playing или pause)
-                                getRutubePlayerState().then(isPlaying => {
-                                    videoStateRef.update({
-                                        currentTime: message.data.time,
-                                        isPlaying: isPlaying,  // Правильное состояние из плеера
-                                        updatedBy: currentUser.id
-                                    });
+                                videoStateRef.update({
+                                    currentTime: message.data.time,
+                                    // isPlaying НЕ обновляем - это делается в changeState
+                                    updatedBy: currentUser.id
                                 });
                             }
                             break;
@@ -1586,7 +1599,7 @@
 
         // ==================== ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ КОМНАТЫ ====================
         function setupRoomListeners(roomId) {
-            console.log('📡 Устанавливаю слушатели комнаты');
+            console.log(`📡 Устанавливаю слушатели комнаты. Мой ID: ${currentUser.id}`);
             
             // Слушаем пользователей
             usersRef.on('value', (snapshot) => {
@@ -1615,6 +1628,7 @@
                     hostName.textContent = hostName_temp;
                     // ИСПРАВЛЕНО: Обновляем флаг на основе ID, а не boolean из БД
                     isHostUser = (currentUser.id === roomHostId);
+                    console.log(`🔐 Определен ХОСТ: ${hostName_temp} (ID: ${actualHostId}), я хост? ${isHostUser}`);
                 }
                 
                 if (!actualHostId && currentUser.roomId) {
@@ -1658,23 +1672,8 @@
                 
                 console.log(`✅ Применяю команду от ${videoData.updatedBy === roomHostId ? 'ХОСТА' : 'другого пользователя'}: ${videoData.command}`);
                 
-                // Для Rutube плеера
-                if (currentVideoData && currentVideoData.type === 'rutube') {
-                    console.log(`📺 Применяю Rutube команду: ${videoData.command} с временем ${videoData.currentTime}`);
-                    if (videoData.command === 'seek') {
-                        controlRutubePlayer('seek', videoData.currentTime);
-                    } else if (videoData.command === 'play') {
-                        controlRutubePlayer('play');
-                    } else if (videoData.command === 'pause') {
-                        controlRutubePlayer('pause');
-                    }
-                    showSyncStatus(true, true);
-                } 
-                // Для нативного видео
-                else if (videoElement) {
-                    console.log(`📹 Применяю нативное видео команду: ${videoData.command}`);
-                    syncVideoState(videoData);
-                }
+                // Применяем команду одинаково для всех типов плееров
+                applyVideoCommand(videoData);
             });
 
             // Слушаем чат
