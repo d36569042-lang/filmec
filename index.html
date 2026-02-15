@@ -1210,11 +1210,27 @@ function setupNativeVideoListeners() {
         function setupRutubePlayer(videoId) {
             console.log('Настройка Rutube плеера с API');
             
+            let lastUpdateTime = 0;
+            
             window.addEventListener('message', function rutubeListener(event) {
                 try {
                     const message = JSON.parse(event.data);
                     
                     console.log('Rutube сообщение:', message);
+                    
+                    // Игнорируем свои команды (если мы только что отправили команду)
+                    const now = Date.now();
+                    if (now - lastCommandTime < 500) {
+                        console.log('⏭️ Ignoringруемое изменение (только что отправили команду)');
+                        return;
+                    }
+                    
+                    // Проверяем, не было ли недавно обновления
+                    if (now - lastUpdateTime < 1000 && message.type === 'player:currentTime') {
+                        console.log('⏭️ Слишком частое обновление, пропускаю');
+                        return;
+                    }
+                    lastUpdateTime = now;
                     
                     switch (message.type) {
                         case 'player:ready':
@@ -1222,11 +1238,13 @@ function setupNativeVideoListeners() {
                             break;
                             
                         case 'player:changeState':
-                            if (message.data.state === 'playing' || message.data.state === 'pause') {
+                            if (message.data && (message.data.state === 'playing' || message.data.state === 'pause')) {
                                 const isPlaying = message.data.state === 'playing';
                                 
                                 getRutubeCurrentTime().then(time => {
                                     if (currentUser.roomId && videoStateRef) {
+                                        console.log(`📤 Отправляю ${isPlaying ? 'play' : 'pause'} в Firebase`);
+                                        lastCommandTime = Date.now();
                                         videoStateRef.update({
                                             command: isPlaying ? 'play' : 'pause',
                                             isPlaying: isPlaying,
@@ -1240,7 +1258,8 @@ function setupNativeVideoListeners() {
                             break;
                             
                         case 'player:currentTime':
-                            if (currentUser.roomId && videoStateRef) {
+                            if (currentUser.roomId && videoStateRef && message.data) {
+                                // Обновляем текущее время без команды, каждые 2 секунды максимум
                                 videoStateRef.update({
                                     currentTime: message.data.time,
                                     updatedBy: currentUser.id
@@ -1248,7 +1267,9 @@ function setupNativeVideoListeners() {
                             }
                             break;
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Ошибка обработки Rutube сообщения:', e);
+                }
             });
         }
 
@@ -1276,26 +1297,41 @@ function setupNativeVideoListeners() {
         }
 
         function controlRutubePlayer(command, value = null) {
-            if (!videoPlayer || !videoPlayer.contentWindow) return;
+            if (!videoPlayer || !videoPlayer.contentWindow) {
+                console.log('⚠️ Rutube плеер не загружен или нет доступа');
+                return;
+            }
+            
+            console.log(`📺 Отправляю Rutube команду: ${command}, значение: ${value}`);
             
             let message = {};
             
             switch (command) {
                 case 'play':
                     message = { type: 'player:play' };
+                    console.log('▶️ Отправляю play команду');
                     break;
                 case 'pause':
                     message = { type: 'player:pause' };
+                    console.log('⏸️ Отправляю pause команду');
                     break;
                 case 'seek':
                     message = { 
                         type: 'player:setCurrentTime',
                         data: { time: value }
                     };
+                    console.log(`⏪ Отправляю seek команду на ${value}с`);
                     break;
+                default:
+                    return;
             }
             
-            videoPlayer.contentWindow.postMessage(JSON.stringify(message), '*');
+            try {
+                videoPlayer.contentWindow.postMessage(JSON.stringify(message), '*');
+                showSyncStatus(true, true);
+            } catch (e) {
+                console.error('Ошибка отправки команды Rutube:', e);
+            }
         }
 
         // ==================== VK PLAYER ====================
@@ -1576,20 +1612,55 @@ function setupNativeVideoListeners() {
             });
 
             // ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ ВИДЕО
-           videoStateRef.on('value', (snapshot) => {
+            videoStateRef.on('value', (snapshot) => {
     const videoData = snapshot.val();
     if (!videoData) return;
     
-    console.log('📡 Получены данные видео:', videoData);
+    console.log('📡 Получены данные видео от Firebase:', {
+        command: videoData.command,
+        currentTime: videoData.currentTime,
+        isPlaying: videoData.isPlaying,
+        updatedBy: videoData.updatedBy,
+        currentUserId: currentUser.id
+    });
     
     // Загружаем видео, если его еще нет
     if (videoData.url && (!currentVideoTitle.textContent || currentVideoTitle.textContent === 'Вставьте ссылку на видео')) {
+        console.log('🎬 Загружаю новое видео');
         loadVideo(videoData.url, videoData.title);
         return;
     }
     
-    // Синхронизируем состояние (игнорируем свои команды внутри функции)
-    syncVideoState(videoData);
+    // КРИТИЧНО: НИКОГДА не применяем свои команды
+    if (videoData.updatedBy === currentUser.id) {
+        console.log('🚫 ИГНОРИРУЮ - это моя команда (updatedBy === currentUser.id)');
+        return;
+    }
+    
+    // Проверяем, есть ли команда (не просто обновление состояния)
+    if (videoData.command) {
+        console.log(`✅ Применяю команду от другого пользователя: ${videoData.command}`);
+        
+        // Для Rutube плеера
+        if (currentVideoData && currentVideoData.type === 'rutube') {
+            console.log(`📺 Применяю Rutube команду: ${videoData.command} с временем ${videoData.currentTime}`);
+            if (videoData.command === 'seek') {
+                controlRutubePlayer('seek', videoData.currentTime);
+            } else if (videoData.command === 'play') {
+                controlRutubePlayer('play');
+            } else if (videoData.command === 'pause') {
+                controlRutubePlayer('pause');
+            }
+            showSyncStatus(true, true);
+        } 
+        // Для нативного видео
+        else if (videoElement) {
+            console.log(`📹 Применяю нативное видео команду: ${videoData.command}`);
+            syncVideoState(videoData);
+        }
+    } else {
+        console.log('ℹ️ Только обновление состояния (без команды)');
+    }
 });
 
             // Слушаем чат
