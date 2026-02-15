@@ -797,12 +797,19 @@
         function applyVideoCommand(videoData) {
             if (!videoData) return;
             
-            console.log(`🎬 Применяю команду: ${videoData.command || 'sync'}, время: ${videoData.currentTime}`);
+            console.log(`🎬 Применяю команду: ${videoData.command || 'sync'}, время: ${videoData.currentTime}, currentVideoData=${!!currentVideoData}`);
+            
+            // КРИТИЧНО: Проверяем что видео готово
+            if (!currentVideoData) {
+                console.log('⚠️ Видео еще не загружено, ставим задержку');
+                setTimeout(() => applyVideoCommand(videoData), 500);
+                return;
+            }
             
             // Устанавливаем флаг, чтобы внутренние события не отправляли команды обратно
             isInternalChange = true;
             
-            if (currentVideoData && currentVideoData.type === 'direct' && videoElement) {
+            if (currentVideoData.type === 'direct' && videoElement) {
                 // Сохраняем текущее состояние воспроизведения
                 const wasPaused = videoElement.paused;
                 
@@ -1063,7 +1070,7 @@
 
         // ==================== ЗАГРУЗКА ВИДЕО С АВТОВЫБОРОМ API ====================
         function loadVideo(url, title = '') {
-            console.log(`📺 loadVideo вызвана. isHostUser=${isHostUser}, roomHostId=${roomHostId}, currentUser.id=${currentUser.id}`);
+            console.log(`📺 loadVideo вызвана. isHostUser=${isHostUser}, roomHostId=${roomHostId}, currentUser.id=${currentUser.id}, url=${url}`);
             
             const videoData = parseVideoUrl(url);
             if (!videoData) {
@@ -1072,6 +1079,7 @@
             }
 
             currentVideoData = videoData;
+            console.log(`✅ Видео успешно распарсено: type=${videoData.type}, hasApiAvailable=${videoData.apiAvailable}`);
 
             // Очищаем предыдущие плееры ИЗ ПАМЯТИ
             if (videoElement) {
@@ -1122,14 +1130,10 @@
 
             currentVideoTitle.textContent = title || videoData.title || 'Видео';
 
-            // Обновляем в Firebase - ТОЛЬКО если мы хост!
-            if (!isHostUser) {
-                console.log('❌ Только ХОСТ может загружать видео');
-                addChatMessage('Система', '❌ Только хост может загружать видео', 'system');
-                return false;
-            }
-            
-            if (currentUser.roomId && videoStateRef) {
+            // ЗАГРУЖАЕМ ПЛЕЕР ВСЕГДА (у обоих пользователей)
+            // Но ОТПРАВЛЯЕМ в Firebase только если хост
+            if (currentUser.roomId && videoStateRef && isHostUser) {
+                console.log('📤 ХОСТ отправляет видео в базу');
                 videoStateRef.update({
                     url: url,
                     embedUrl: videoData.embedUrl,
@@ -1143,6 +1147,8 @@
                     updatedBy: currentUser.id,
                     updatedAt: firebase.database.ServerValue.TIMESTAMP
                 });
+            } else if (currentUser.roomId && !isHostUser) {
+                console.log('👥 ЗРИТЕЛЬ загружает видео локально (не отправляет в БД)');
             }
 
             addChatMessage('Система', `🎬 Загружено: ${currentVideoTitle.textContent} (${videoData.type})`, 'system');
@@ -1240,23 +1246,46 @@
             };
             
             window.addEventListener('message', window.rutubeMessageHandler);
+            
+            // КРИТИЧНО: После установки слушателя, запросим текущее состояние плеера
+            // Это гарантирует што видео будет загружено для всех (и хоста и гостей)
+            setTimeout(() => {
+                if (videoPlayer && videoPlayer.contentWindow) {
+                    videoPlayer.contentWindow.postMessage(JSON.stringify({
+                        type: 'player:getCurrentTime'
+                    }), '*');
+                    console.log('🔍 Запросил текущее время у Rutube плеера');
+                }
+            }, 500);
         }
 
         function getRutubeCurrentTime() {
             return new Promise((resolve) => {
-                videoPlayer.contentWindow.postMessage(JSON.stringify({
-                    type: 'player:getCurrentTime'
-                }), '*');
+                if (!videoPlayer || !videoPlayer.contentWindow) {
+                    console.log('⚠️ Rutube плеер не готов, возвращаю 0');
+                    resolve(0);
+                    return;
+                }
+                
+                try {
+                    videoPlayer.contentWindow.postMessage(JSON.stringify({
+                        type: 'player:getCurrentTime'
+                    }), '*');
+                } catch (e) {
+                    console.log('⚠️ Ошибка при запросе времени Rutube:', e);
+                    resolve(0);
+                    return;
+                }
                 
                 const timeout = setTimeout(() => resolve(0), 1000);
                 
                 const handler = (event) => {
                     try {
                         const message = JSON.parse(event.data);
-                        if (message.type === 'player:currentTime') {
+                        if (message.type === 'player:currentTime' && message.data) {
                             window.removeEventListener('message', handler);
                             clearTimeout(timeout);
-                            resolve(message.data.time);
+                            resolve(message.data.time || 0);
                         }
                     } catch (e) {}
                 };
@@ -1276,7 +1305,8 @@
 
         function controlRutubePlayer(command, value = null) {
             if (!videoPlayer || !videoPlayer.contentWindow) {
-                console.log('⚠️ Rutube плеер не загружен или нет доступа');
+                console.log('⚠️ Rutube плеер не загружен или нет доступа, переупробуем через 500мс');
+                setTimeout(() => controlRutubePlayer(command, value), 500);
                 return;
             }
             
@@ -1458,7 +1488,9 @@
                     embedUrl: '',
                     title: '',
                     isPlaying: false,
-                    currentTime: 0
+                    currentTime: 0,
+                    command: '',
+                    updatedBy: null
                 }
             }).then(() => {
                 currentUser.roomId = roomId;
@@ -1526,6 +1558,23 @@
             } else {
                 addChatMessage('Система', '👥 Вы подключились как зритель (видео управляет ХОСТ)', 'system');
                 console.log('👥 Я ЗРИТЕЛЬ - синхронизирую с хостом');
+                
+                // КРИТИЧНО для гостей: загрузить текущее видео хоста если оно есть
+                if (videoStateRef) {
+                    videoStateRef.once('value').then((snapshot) => {
+                        const videoData = snapshot.val();
+                        if (videoData && videoData.url) {
+                            console.log('📺 ГОСТЬ загружает видео хоста при присоединении:', videoData.url);
+                            loadVideo(videoData.url, videoData.title);
+                            
+                            // Если видео уже воспроизводится - спросим у хоста актуальное состояние
+                            if (videoData.isPlaying) {
+                                console.log('▶️ Видео уже воспроизводится, ставлю на паузу до синхронизации');
+                                // applyVideoCommand будет вызван quando videoStateRef обновится
+                            }
+                        }
+                    });
+                }
             }
             
             // Запускаем периодическую проверку для всех (включая хоста)
@@ -1666,11 +1715,11 @@
                 
                 // Если нет команды - это просто обновление состояния
                 if (!videoData.command) {
-                    console.log('ℹ️ Только обновление состояния, без команды для применения');
+                    console.log('ℹ️ Только обновление состояния без команды');
                     return;
                 }
                 
-                console.log(`✅ Применяю команду от ${videoData.updatedBy === roomHostId ? 'ХОСТА' : 'другого пользователя'}: ${videoData.command}`);
+                console.log(`✅ Применяю команду: ${videoData.command}`);
                 
                 // Применяем команду одинаково для всех типов плееров
                 applyVideoCommand(videoData);
@@ -1764,6 +1813,11 @@
         });
 
         loadUrlBtn.addEventListener('click', () => {
+            if (!isHostUser) {
+                alert('Только хост может загружать видео');
+                return;
+            }
+            
             const url = urlInput.value.trim();
             if (url) {
                 if (!currentUser.roomId) {
