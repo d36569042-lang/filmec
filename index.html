@@ -726,6 +726,7 @@
         let lastCommandTime = 0; // Отслеживание времени последней команды
         let isHostUser = false; // Текущий пользователь - хост комнаты (управляет видео)
         let lastRutubeUpdateTime = 0; // Для дебаунса Rutube обновлений
+        let rutubePlayerIsPlaying = true; // Отслеживание состояния Rutube плеера (playing/pause)
         
         // Специфичные для плееров переменные
         let rutubePlayer = null;
@@ -1188,6 +1189,7 @@
                         case 'player:changeState':
                             if (message.data && (message.data.state === 'playing' || message.data.state === 'pause')) {
                                 const isPlaying = message.data.state === 'playing';
+                                rutubePlayerIsPlaying = isPlaying; // Сохраняем состояние
                                 
                                 getRutubeCurrentTime().then(time => {
                                     if (currentUser.roomId && videoStateRef) {
@@ -1208,10 +1210,13 @@
                         case 'player:currentTime':
                             // Только хост обновляет текущее время
                             if (isHostUser && currentUser.roomId && videoStateRef && message.data) {
-                                videoStateRef.update({
-                                    currentTime: message.data.time,
-                                    isPlaying: true,
-                                    updatedBy: currentUser.id
+                                // Запрашиваем реальное состояние плеера (playing или pause)
+                                getRutubePlayerState().then(isPlaying => {
+                                    videoStateRef.update({
+                                        currentTime: message.data.time,
+                                        isPlaying: isPlaying,  // Правильное состояние из плеера
+                                        updatedBy: currentUser.id
+                                    });
                                 });
                             }
                             break;
@@ -1244,6 +1249,15 @@
                 };
                 
                 window.addEventListener('message', handler);
+            });
+        }
+        
+        // НОВАЯ ФУНКЦИЯ: Получить реальное состояние плеера Rutube (playing или pause)
+        function getRutubePlayerState() {
+            return new Promise((resolve) => {
+                // Возвращаем последнее известное состояние плеера
+                // (оно обновляется при каждом changeState событии)
+                resolve(rutubePlayerIsPlaying);
             });
         }
 
