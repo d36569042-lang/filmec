@@ -1632,21 +1632,30 @@ function setupNativeVideoListeners() {
                 const userCount = Object.keys(users).length;
                 onlineCount.textContent = `${userCount} онлайн`;
                 
-                let hostFound = false;
+                // ИСПРАВЛЕНО: Правильно определяем хоста один раз
+                let actualHostId = null;
+                let hostName_temp = '';
                 guestBadge.style.display = 'none';
                 
                 Object.entries(users).forEach(([id, user]) => {
                     if (user.isHost) {
-                        hostName.textContent = user.name;
-                        roomHostId = id;
-                        hostFound = true;
+                        actualHostId = id;
+                        hostName_temp = user.name;
                     } else {
                         guestName.textContent = user.name;
                         guestBadge.style.display = 'flex';
                     }
                 });
                 
-                if (!hostFound && currentUser.roomId) {
+                // Обновляем ID хоста один раз
+                if (actualHostId) {
+                    roomHostId = actualHostId;
+                    hostName.textContent = hostName_temp;
+                    // ИСПРАВЛЕНО: Обновляем флаг на основе ID, а не boolean из БД
+                    isHostUser = (currentUser.id === roomHostId);
+                }
+                
+                if (!actualHostId && currentUser.roomId) {
                     alert('Хост покинул комнату');
                     leaveRoom();
                 }
@@ -1670,22 +1679,34 @@ function setupNativeVideoListeners() {
                 if (videoData.url && (!currentVideoTitle.textContent || currentVideoTitle.textContent === 'Вставьте ссылку на видео')) {
                     console.log('🎬 Загружаю новое видео');
                     loadVideo(videoData.url, videoData.title);
+                }
+                
+                // ИСПРАВЛЕНО: Проверяем, кто отправил команду
+                // Игнорируем свои собственные команды (пришедшие из Firebase после отправки)
+                if (videoData.updatedBy === currentUser.id) {
+                    console.log('🔄 Это моя команда из Firebase - игнорирую');
                     return;
                 }
                 
-                // ЕСЛИ Я ХОСТ - игнорирую всё (я только отправляю, не получаю)
-                if (isHostUser) {
-                    console.log('🎬 Я ХОСТ - я не применяю команды (я их отправляю)');
+                // ЕСЛИ Я ХОСТ - применяю команду только если она пришла от меня
+                // ЕСЛИ Я ЗРИТЕЛЬ - применяю команду только если она пришла от хоста
+                if (isHostUser && videoData.updatedBy !== currentUser.id) {
+                    console.log('🎬 Я ХОСТ - игнорирую команды от других');
                     return;
                 }
                 
-                // ЕСЛИ Я ЗРИТЕЛЬ - применяю только команды от хоста
+                if (!isHostUser && videoData.updatedBy !== roomHostId) {
+                    console.log('👁️ Я ЗРИТЕЛЬ - принимаю команды только от хоста');
+                    return;
+                }
+                
+                // Если нет команды - это просто обновление состояния
                 if (!videoData.command) {
-                    console.log('ℹ️ Только обновление состояния (без команды)');
+                    console.log('ℹ️ Только обновление состояния, без команды для применения');
                     return;
                 }
                 
-                console.log(`✅ ЗРИТЕЛЬ применяет команду: ${videoData.command}`);
+                console.log(`✅ Применяю команду: ${videoData.command}`);
                 
                 // Для Rutube плеера
                 if (currentVideoData && currentVideoData.type === 'rutube') {
