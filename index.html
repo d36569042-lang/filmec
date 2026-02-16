@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>CINEMATE · Идеальная синхронизация</title>
+    <title>CINEMATE</title>
     <style>
-        /* Стили без изменений (как в предыдущей версии) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -131,7 +130,6 @@
             color: white;
             padding: 12px 15px;
             border-radius: 50px;
-            width: 250px;
             outline: none;
         }
         
@@ -183,6 +181,7 @@
         .users-list {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         
         .user-badge {
@@ -242,23 +241,6 @@
             background: #738dff;
         }
         
-        .supported-sites {
-            display: flex;
-            gap: 15px;
-            margin: 10px 0 0 15px;
-            color: #888;
-            font-size: 13px;
-            flex-wrap: wrap;
-        }
-        
-        .supported-sites span i {
-            margin-right: 5px;
-        }
-        
-        .supported-sites .vk { color: #4a76a8; }
-        .supported-sites .rutube { color: #7cd3ff; }
-        .supported-sites .ok { color: #ee8208; }
-        
         .main-content {
             display: grid;
             grid-template-columns: 1fr 320px;
@@ -309,18 +291,14 @@
             width: 100%;
             height: 100%;
             border: none;
-        }
-        
-        .native-video-player {
-            width: 100%;
-            height: 100%;
             display: none;
         }
         
-        .native-video-player video {
+        .native-video {
             width: 100%;
             height: 100%;
             background: #000;
+            display: none;
         }
         
         .player-controls-overlay {
@@ -332,12 +310,7 @@
             gap: 10px;
             justify-content: center;
             z-index: 20;
-            pointer-events: none;
             flex-wrap: wrap;
-        }
-        
-        .player-controls-overlay button {
-            pointer-events: auto;
         }
         
         .control-btn {
@@ -357,11 +330,6 @@
         
         .control-btn:hover {
             background: #5f7cff;
-            transform: scale(1.05);
-        }
-        
-        .control-btn.secondary {
-            background: rgba(42, 47, 58, 0.9);
         }
         
         .sync-status {
@@ -500,7 +468,6 @@
         
         .chat-send-btn:hover:not(:disabled) {
             background: #738dff;
-            transform: scale(1.1);
         }
         
         .chat-send-btn:disabled {
@@ -508,21 +475,12 @@
             cursor: not-allowed;
         }
         
-        .typing-indicator {
-            color: #888;
-            font-size: 12px;
-            padding: 5px 15px;
-            font-style: italic;
-        }
-        
-        .sync-progress {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            height: 3px;
+        .role-badge {
             background: #5f7cff;
-            width: 0%;
-            transition: width 0.3s;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-left: 5px;
         }
         
         @media (max-width: 900px) {
@@ -539,58 +497,30 @@
                 height: 400px;
             }
         }
-        
-        @media (max-width: 600px) {
-            .url-box {
-                flex-direction: column;
-                border-radius: 24px;
-            }
-            
-            .url-box button {
-                padding: 12px;
-                margin: 0 5px 5px 5px;
-            }
-            
-            .room-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
-            
-            .room-input {
-                width: 100%;
-            }
-            
-            .room-info {
-                flex-direction: column;
-                align-items: stretch;
-            }
-        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <div class="logo">
-                <i class="fas fa-film"></i> CINEMATE
+                <i class="fas fa-film"></i> CINEMATE 
             </div>
             <div class="connection-status" id="connectionStatus">
                 <span class="status-indicator status-disconnected" id="statusIndicator"></span>
-                <span id="statusText">Не подключено к серверу</span>
+                <span id="statusText">Подключение...</span>
             </div>
         </div>
         
         <div class="guide">
-            <h4><i class="fas fa-info-circle"></i> Как смотреть вместе:</h4>
+            <h4><i class="fas fa-info-circle"></i> Как это работает:</h4>
             <ol>
-                <li><strong>Создатель</strong> нажимает "Создать комнату" → отправляет ID подруге</li>
-                <li><strong>Создатель</strong> вставляет ссылку на видео → нажимает "Загрузить"</li>
-                <li><strong>Подруга</strong> вводит ID комнаты → нажимает "Подключиться"</li>
-                <li>Оба могут управлять видео - всё синхронизируется автоматически</li>
-                <li>Общайтесь в чате во время просмотра!</li>
+                <li><strong>Ведущий</strong> нажимает "Создать комнату"</li>
+                <li><strong>Ведущий</strong> отправляет ID подруге (скопировать кнопку)</li>
+                <li><strong>Зритель</strong> вставляет ID → нажимает "Подключиться"</li>
+                <li><strong>Ведущий</strong> загружает видео (только ведущий может)</li>
+                <li>Все остальные синхронизируются автоматически</li>
             </ol>
         </div>
         
@@ -619,26 +549,14 @@
                         <i class="far fa-copy"></i>
                     </button>
                 </div>
-                <div class="users-list" id="usersList">
-                    <div class="user-badge host" id="hostBadge">
-                        <i class="fas fa-crown"></i> <span id="hostName">Хост</span>
-                    </div>
-                    <div class="user-badge" id="guestBadge" style="display: none;">
-                        <i class="fas fa-user"></i> <span id="guestName">Подруга</span>
-                    </div>
-                </div>
+                <div class="users-list" id="participantsList"></div>
             </div>
         </div>
         
         <div class="url-section">
             <div class="url-box">
-                <input type="text" id="urlInput" placeholder="Вставьте ссылку на видео (VK, Rutube, OK, прямые ссылки)">
+                <input type="text" id="urlInput" placeholder="Ссылка на видео (MP4, Rutube, VK)">
                 <button id="loadUrlBtn"><i class="fas fa-play"></i> Загрузить</button>
-            </div>
-            <div class="supported-sites">
-                <span class="vk"><i class="fab fa-vk"></i> VK (все форматы)</span>
-                <span class="rutube"><i class="fas fa-play-circle"></i> Rutube (полная синхронизация)</span>
-                <span class="ok"><i class="fab fa-odnoklassniki"></i> OK</span>
             </div>
         </div>
         
@@ -649,9 +567,7 @@
                 </div>
                 <div class="player-wrapper" id="playerWrapper">
                     <iframe id="videoPlayer" frameborder="0" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
-                    <div class="native-video-player" id="nativePlayer">
-                        <video id="nativeVideo" controls></video>
-                    </div>
+                    <video id="nativeVideo" class="native-video" controls></video>
                 </div>
                 
                 <div class="player-controls-overlay">
@@ -663,7 +579,6 @@
                 <div class="sync-status" id="syncStatus">
                     <i class="fas fa-sync-alt fa-spin"></i> Синхронизация...
                 </div>
-                <div class="sync-progress" id="syncProgress"></div>
             </div>
             
             <div class="chat-container">
@@ -672,7 +587,6 @@
                     <span class="online-count" id="onlineCount">0 онлайн</span>
                 </div>
                 <div class="chat-messages" id="chatMessages"></div>
-                <div class="typing-indicator" id="typingIndicator" style="display: none;"></div>
                 <div class="chat-input-area">
                     <input type="text" class="chat-input" id="chatInput" placeholder="Напишите сообщение..." disabled>
                     <button class="chat-send-btn" id="sendMessageBtn" disabled>
@@ -684,1213 +598,544 @@
     </div>
 
     <script>
-        // ==================== КОНФИГУРАЦИЯ FIREBASE ====================
-        const firebaseConfig = {
-            apiKey: "AIzaSyAOytQY6UErb0MAJI5WrBCf-jD9nq4XMcE",
-            authDomain: "cinemateapp1.firebaseapp.com",
-            databaseURL: "https://cinemateapp1-default-rtdb.europe-west1.firebasedatabase.app",
-            projectId: "cinemateapp1",
-            storageBucket: "cinemateapp1.firebasestorage.app",
-            messagingSenderId: "916445746392",
-            appId: "1:916445746392:web:4a9afd407a7ea9c60933ad"
+        // ==================== SOCKET.IO ИНИЦИАЛИЗАЦИЯ ====================
+        const socket = io();
+        
+        // ==================== ПЕРЕМЕННЫЕ СОСТОЯНИЯ ====================
+        const state = {
+            roomId: null,
+            userId: generateUserId(),
+            username: generateUsername(),
+            isLeader: false,
+            currentVideoData: null,
+            isPlaying: false,
+            currentTime: 0,
+            ignoreNextSync: false,
+            lastCommandTime: 0,
+            participants: new Map()
         };
 
-        firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
-
-        // ============== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
-        let currentUser = {
-            id: generateUserId(),
-            name: generateUserName(),
-            isHost: false,
-            roomId: null
+        // ==================== DOM ЭЛЕМЕНТЫ ====================
+        const elements = {
+            createRoomBtn: document.getElementById('createRoomBtn'),
+            joinRoomBtn: document.getElementById('joinRoomBtn'),
+            leaveRoomBtn: document.getElementById('leaveRoomBtn'),
+            roomIdInput: document.getElementById('roomIdInput'),
+            roomInfo: document.getElementById('roomInfo'),
+            currentRoomId: document.getElementById('currentRoomId'),
+            copyRoomIdBtn: document.getElementById('copyRoomIdBtn'),
+            participantsList: document.getElementById('participantsList'),
+            onlineCount: document.getElementById('onlineCount'),
+            
+            urlInput: document.getElementById('urlInput'),
+            loadUrlBtn: document.getElementById('loadUrlBtn'),
+            videoPlayer: document.getElementById('videoPlayer'),
+            nativeVideo: document.getElementById('nativeVideo'),
+            currentVideoTitle: document.getElementById('currentVideoTitle'),
+            syncNowBtn: document.getElementById('syncNowBtn'),
+            syncStatus: document.getElementById('syncStatus'),
+            
+            chatMessages: document.getElementById('chatMessages'),
+            chatInput: document.getElementById('chatInput'),
+            sendMessageBtn: document.getElementById('sendMessageBtn'),
+            
+            statusIndicator: document.getElementById('statusIndicator'),
+            statusText: document.getElementById('statusText')
         };
-        
-        let roomRef = null;
-        let usersRef = null;
-        let videoStateRef = null;
-        let chatRef = null;
-        
-        let videoElement = null;
-        let isSyncing = false;
-        let ignoreNextEvent = false;
-        let syncInterval = null;
-        let currentVideoData = null;
-        let isInternalChange = false; // Флаг для внутренних изменений видео
-        
-        // НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ СИНХРОНИЗАЦИИ
-        let syncCheckInterval = null;
-        const SYNC_CHECK_INTERVAL = 15000; // 15 секунд
-        const SYNC_TOLERANCE = 5; // допустимое расхождение 5 секунд
-        let roomHostId = null; // ID хоста комнаты
-        let lastCommandTime = 0; // Отслеживание времени последней команды
-        let isHostUser = false; // Текущий пользователь - хост комнаты (управляет видео)
-        let lastRutubeUpdateTime = 0; // Для дебаунса Rutube обновлений
-        let rutubePlayerIsPlaying = true; // Отслеживание состояния Rutube плеера (playing/pause)
-        
-        // Специфичные для плееров переменные
-        let rutubePlayer = null;
-        let vkPlayer = null;
-        
-        // DOM элементы
-        const createRoomBtn = document.getElementById('createRoomBtn');
-        const joinRoomBtn = document.getElementById('joinRoomBtn');
-        const leaveRoomBtn = document.getElementById('leaveRoomBtn');
-        const roomIdInput = document.getElementById('roomIdInput');
-        const roomInfo = document.getElementById('roomInfo');
-        const currentRoomIdSpan = document.getElementById('currentRoomId');
-        const copyRoomIdBtn = document.getElementById('copyRoomIdBtn');
-        const hostName = document.getElementById('hostName');
-        const guestBadge = document.getElementById('guestBadge');
-        const guestName = document.getElementById('guestName');
-        const onlineCount = document.getElementById('onlineCount');
-        const loadUrlBtn = document.getElementById('loadUrlBtn');
-        const urlInput = document.getElementById('urlInput');
-        const videoPlayer = document.getElementById('videoPlayer');
-        const nativePlayer = document.getElementById('nativePlayer');
-        const nativeVideo = document.getElementById('nativeVideo');
-        const currentVideoTitle = document.getElementById('currentVideoTitle');
-        const syncNowBtn = document.getElementById('syncNowBtn');
-        const syncStatus = document.getElementById('syncStatus');
-        const syncProgress = document.getElementById('syncProgress');
-        const chatMessages = document.getElementById('chatMessages');
-        const chatInput = document.getElementById('chatInput');
-        const sendMessageBtn = document.getElementById('sendMessageBtn');
-        const typingIndicator = document.getElementById('typingIndicator');
-        const statusIndicator = document.getElementById('statusIndicator');
-        const statusText = document.getElementById('statusText');
 
         // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
         function generateUserId() {
             return 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         }
 
-        function generateUserName() {
+        function generateUsername() {
             const names = ['Киноман', 'MovieFan', 'Cinephile', 'Зритель', 'Сериаломан'];
             return names[Math.floor(Math.random() * names.length)] + Math.floor(Math.random() * 1000);
         }
 
-        function showSyncStatus(show = true, autoHide = true) {
-            syncStatus.style.display = show ? 'flex' : 'none';
-            if (show && autoHide) {
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                elements.statusIndicator.className = 'status-indicator status-connected';
+                elements.statusText.textContent = 'Подключено';
+            } else {
+                elements.statusIndicator.className = 'status-indicator status-disconnected';
+                elements.statusText.textContent = 'Нет подключения';
+            }
+        }
+
+        function showSyncStatus(show = true) {
+            elements.syncStatus.style.display = show ? 'flex' : 'none';
+            if (show) {
                 setTimeout(() => {
-                    syncStatus.style.display = 'none';
+                    elements.syncStatus.style.display = 'none';
                 }, 2000);
             }
         }
 
-        function updateSyncProgress(percent) {
-            syncProgress.style.width = percent + '%';
+        function addSystemMessage(text) {
+            const div = document.createElement('div');
+            div.className = 'message system';
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            div.innerHTML = `
+                <div class="text">${text}</div>
+                <div class="time">${time}</div>
+            `;
+            elements.chatMessages.appendChild(div);
+            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
         }
 
-        function updateConnectionStatus(connected) {
-            if (connected) {
-                statusIndicator.className = 'status-indicator status-connected';
-                statusText.textContent = 'Подключено к серверу';
+        function addChatMessage(username, text, isOwn = false) {
+            const div = document.createElement('div');
+            div.className = `message ${isOwn ? 'own' : 'other'}`;
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            div.innerHTML = `
+                <div class="sender">${isOwn ? 'Вы' : username}</div>
+                <div class="text">${text}</div>
+                <div class="time">${time}</div>
+            `;
+            elements.chatMessages.appendChild(div);
+            elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+        }
+
+        // ==================== SOCKET.IO СОБЫТИЯ ====================
+        socket.on('connect', () => {
+            console.log('✅ Подключено к серверу');
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('❌ Отключено от сервера');
+            updateConnectionStatus(false);
+        });
+
+        socket.on('room-info', (data) => {
+            console.log('📡 Получена информация о комнате:', data);
+            state.isLeader = data.yourRole === 'leader';
+            state.roomId = data.roomId;
+            updateParticipantsList(data.participants);
+            elements.onlineCount.textContent = `${data.participants.length} онлайн`;
+            
+            // ИСПРАВЛЕНО БАГ #1: Вызываем функцию которая показывает комнату и ID
+            handleJoinRoomSuccess(data.roomId);
+            
+            // Системное сообщение о присоединении
+            addSystemMessage(`✅ Присоединились к комнате: ${data.roomId}`);
+            
+            if (state.isLeader) {
+                addSystemMessage('👑 Вы ВЕДУЩИЙ. Только вы можете управлять видео');
+                elements.loadUrlBtn.disabled = false;
+                elements.urlInput.disabled = false;
             } else {
-                statusIndicator.className = 'status-indicator status-disconnected';
-                statusText.textContent = 'Нет подключения';
+                addSystemMessage('👥 Вы ЗРИТЕЛЬ. Следуете за ведущим');
+                elements.loadUrlBtn.disabled = true;
+                elements.urlInput.disabled = true;
             }
-        }
+        });
 
-        // ==================== ИСПРАВЛЕННАЯ ФУНКЦИЯ ПРИМЕНЕНИЯ КОМАНД ВИДЕО ====================
-        function applyVideoCommand(videoData) {
-            if (!videoData) return;
+        socket.on('participant-joined', (data) => {
+            console.log('👤 Новый участник:', data);
+            updateParticipantsList(data.participants);
+            elements.onlineCount.textContent = `${data.participants.length} онлайн`;
+            addSystemMessage(`${data.message}`);
+        });
+
+        socket.on('participant-left', (data) => {
+            console.log('👤 Участник ушел:', data);
+            updateParticipantsList(data.participants);
+            elements.onlineCount.textContent = `${data.participants.length} онлайн`;
+            addSystemMessage(`${data.message}`);
+        });
+
+        socket.on('leadership-transferred', (data) => {
+            console.log('👑 Роль передана:', data);
+            addSystemMessage(`${data.message}`);
             
-            console.log(`🎬 Применяю команду: ${videoData.command || 'sync'}, время: ${videoData.currentTime}, currentVideoData=${!!currentVideoData}`);
+            // Проверяем, не нам ли передали роль
+            if (data.newLeaderId === state.userId) {
+                state.isLeader = true;
+                elements.loadUrlBtn.disabled = false;
+                elements.urlInput.disabled = false;
+                addSystemMessage('🎬 Вам передана роль ВЕДУЩЕГО!');
+            } else if (state.isLeader) {
+                state.isLeader = false;
+                elements.loadUrlBtn.disabled = true;
+                elements.urlInput.disabled = true;
+                addSystemMessage('📺 Вы больше уже не ведущий');
+            }
+        });
+
+        socket.on('kicked', (data) => {
+            alert(data.reason);
+            leaveRoom();
+        });
+
+        socket.on('video-sync', (data) => {
+            console.log('🎬 Команда синхронизации:', data);
             
-            // КРИТИЧНО: Проверяем что видео готово
-            if (!currentVideoData) {
-                console.log('⚠️ Видео еще не загружено, ставим задержку');
-                setTimeout(() => applyVideoCommand(videoData), 500);
+            // Игнорируем свои команды
+            if (data.leaderId === state.userId) {
+                console.log('🔄 Это моя команда - игнорирую');
                 return;
             }
             
-            // Устанавливаем флаг, чтобы внутренние события не отправляли команды обратно
-            isInternalChange = true;
+            applyVideoCommand(data);
+            showSyncStatus(true);
+        });
+
+        socket.on('sync-tick', (data) => {
+            // Периодическая синхронизация для проверки рассинхронов
+            if (!state.isLeader && state.currentVideoData && !state.ignoreNextSync) {
+                checkAndCorrectSync(data);
+            }
+        });
+
+        socket.on('sync-response', (data) => {
+            // Получили результат синхро запроса
+            if (Math.abs(state.currentTime - data.expectedTime) > 1) {
+                console.log(`⚠️ Рассинхрон: текущее ${state.currentTime.toFixed(1)}с, ожидаемое ${data.expectedTime.toFixed(1)}с`);
+                gentleSync(data.expectedTime);
+            }
+        });
+
+        socket.on('chat-message', (data) => {
+            addChatMessage(data.username, data.message, false);
+        });
+
+        socket.on('error', (data) => {
+            console.error('❌ Ошибка:', data.message);
+            alert('Ошибка: ' + data.message);
+        });
+
+        // ==================== УПРАВЛЕНИЕ КОМНАТОЙ ====================
+        function createRoom() {
+            socket.emit('join-room', {
+                roomId: 'room_' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+                username: state.username
+            });
+        }
+
+        function joinRoom(roomId) {
+            socket.emit('join-room', {
+                roomId: roomId,
+                username: state.username
+            });
+        }
+
+        function handleJoinRoomSuccess(roomId) {
+            state.roomId = roomId;
+            elements.currentRoomId.textContent = roomId;
+            elements.roomInfo.style.display = 'flex';
             
-            if (currentVideoData.type === 'direct' && videoElement) {
-                // Сохраняем текущее состояние воспроизведения
-                const wasPaused = videoElement.paused;
-                
-                // Сначала перематываем, если нужно
-                if (videoData.currentTime !== undefined) {
-                    const timeDiff = Math.abs(videoElement.currentTime - videoData.currentTime);
-                    if (videoData.command === 'seek' || timeDiff > 1) {
-                        videoElement.currentTime = videoData.currentTime;
-                    }
-                }
-                
-                // Потом меняем состояние воспроизведения
-                if (videoData.command === 'play' || (videoData.isPlaying && wasPaused)) {
-                    videoElement.play().catch(e => console.log('Ошибка воспроизведения:', e));
-                } else if (videoData.command === 'pause' || (!videoData.isPlaying && !wasPaused)) {
-                    videoElement.pause();
-                }
-            } else if (currentVideoData && currentVideoData.type === 'rutube') {
-                // Для Rutube плеера отправляем команды через controlRutubePlayer
-                if (videoData.command === 'seek') {
-                    controlRutubePlayer('seek', videoData.currentTime);
-                } else if (videoData.command === 'play') {
-                    controlRutubePlayer('play');
-                } else if (videoData.command === 'pause') {
-                    controlRutubePlayer('pause');
+            elements.createRoomBtn.disabled = true;
+            elements.joinRoomBtn.disabled = true;
+            elements.roomIdInput.disabled = true;
+            elements.leaveRoomBtn.style.display = 'inline-block';
+            elements.chatInput.disabled = false;
+            elements.sendMessageBtn.disabled = false;
+            
+            elements.roomIdInput.value = '';
+        }
+
+        function leaveRoom() {
+            if (!state.roomId) return;
+            
+            // Дополнительная очистка
+            if (state.currentVideoData) {
+                const video = state.currentVideoData.type === 'direct' ? elements.nativeVideo : null;
+                if (video) {
+                    video.pause();
+                    video.src = '';
                 }
             }
             
-            // Сбрасываем флаг после небольшой задержки, чтобы события обработались
-            setTimeout(() => {
-                isInternalChange = false;
-            }, 100);
+            state.roomId = null;
+            state.isLeader = false;
+            state.currentVideoData = null;
             
-            showSyncStatus(true, true);
+            elements.roomInfo.style.display = 'none';
+            elements.createRoomBtn.disabled = false;
+            elements.joinRoomBtn.disabled = false;
+            elements.roomIdInput.disabled = false;
+            elements.leaveRoomBtn.style.display = 'none';
+            elements.chatInput.disabled = true;
+            elements.sendMessageBtn.disabled = true;
+            elements.loadUrlBtn.disabled = true;
+            elements.urlInput.disabled = true;
+            
+            elements.nativeVideo.pause();
+            elements.nativeVideo.src = '';
+            elements.videoPlayer.src = '';
+            elements.nativeVideo.style.display = 'none';
+            elements.videoPlayer.style.display = 'block';
+            elements.currentVideoTitle.textContent = 'Вставьте ссылку на видео';
+            
+            addSystemMessage('👋 Вы покинули комнату');
         }
 
-        // ==================== ИСПРАВЛЕННАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ====================
-        function syncVideoState(videoData) {
-    if (!videoElement || !videoData) return;
-    
-    // КРИТИЧЕСКИ ВАЖНО: игнорируем свои команды!
-    if (videoData.updatedBy === currentUser.id) {
-        console.log('🔄 Игнорирую свою команду (она от меня)');
-        return;
-    }
-    
-    // Применяю команду от другого пользователя
-    console.log(`🎬 Применяю команду от ${videoData.updatedBy}: ${videoData.command || 'sync'}`);
-    applyVideoCommand(videoData);
-}
-
-
-        // ==================== НОВАЯ ФУНКЦИЯ ПЕРИОДИЧЕСКОЙ ПРОВЕРКИ СИНХРОНИЗАЦИИ ====================
-        function startPeriodicSyncCheck() {
-            if (syncCheckInterval) clearInterval(syncCheckInterval);
-            
-            syncCheckInterval = setInterval(() => {
-                // ТОЛЬКО ЗРИТЕЛЬ проверяет синхронизацию (хост - инициатор)
-                if (isHostUser || !currentUser.roomId || !videoStateRef) return;
-                
-                // Запрашиваем текущее состояние у Firebase
-                videoStateRef.once('value').then((snapshot) => {
-                    const hostVideoData = snapshot.val();
-                    if (!hostVideoData) return;
-                    
-                    // Проверяем расхождение
-                    checkAndSyncWithHost(hostVideoData);
-                });
-            }, SYNC_CHECK_INTERVAL);
+        function updateParticipantsList(participants) {
+            elements.participantsList.innerHTML = '';
+            participants.forEach(p => {
+                const badge = document.createElement('div');
+                badge.className = `user-badge ${p.role === 'leader' ? 'host' : ''}`;
+                badge.innerHTML = `
+                    <i class="${p.role === 'leader' ? 'fas fa-crown' : 'fas fa-user'}"></i>
+                    <span>${p.username}</span>
+                    ${p.role === 'leader' ? '<span class="role-badge">ВЕДУЩИЙ</span>' : ''}
+                `;
+                elements.participantsList.appendChild(badge);
+            });
         }
 
-        // НОВАЯ ФУНКЦИЯ ПРОВЕРКИ РАСХОЖДЕНИЙ
-        function checkAndSyncWithHost(hostData) {
-            if (!currentVideoData) return;
-            
-            let currentTime = 0;
-            if (currentVideoData.type === 'direct' && videoElement) {
-                currentTime = videoElement.currentTime;
-            } else if (currentVideoData.type === 'rutube') {
-                // Для Rutube используем время из hostData
-                currentTime = hostData.currentTime;
-            }
-            
-            const timeDiff = Math.abs(currentTime - hostData.currentTime);
-            
-            console.log(`🔍 Проверка синхронизации: текущее ${currentTime.toFixed(1)}с, хост ${hostData.currentTime.toFixed(1)}с, разница ${timeDiff.toFixed(1)}с`);
-            
-            // Если расхождение больше допустимого (5 секунд)
-            if (timeDiff > SYNC_TOLERANCE) {
-                console.log(`❌ Расхождение ${timeDiff.toFixed(1)}с > ${SYNC_TOLERANCE}с, синхронизируюсь!`);
-                
-                // Показываем уведомление
-                showSyncStatus(true, false);
-                
-                // Плавная синхронизация
-                gentleSync(hostData.currentTime, hostData.isPlaying);
-                
-                // Автоматически скрываем статус через 3 секунды
-                setTimeout(() => showSyncStatus(false), 3000);
-            } else {
-                console.log(`✅ Расхождение ${timeDiff.toFixed(1)}с в пределах нормы`);
-            }
-        }
-
-        // НОВАЯ ФУНКЦИЯ ПЛАВНОЙ СИНХРОНИЗАЦИИ
-        function gentleSync(targetTime, shouldBePlaying) {
-            if (!currentVideoData) return;
-            
-            console.log(`🎬 Плавная синхронизация на ${targetTime.toFixed(1)}с, play=${shouldBePlaying}`);
-            
-            // Устанавливаем флаг, чтобы события не отправляли команды обратно
-            isInternalChange = true;
-            
-            if (currentVideoData.type === 'direct' && videoElement) {
-                // Проверяем, достаточно ли забуферизировано для перемотки
-                const buffered = videoElement.buffered;
-                let canSeek = false;
-                
-                for (let i = 0; i < buffered.length; i++) {
-                    if (targetTime >= buffered.start(i) && targetTime <= buffered.end(i)) {
-                        canSeek = true;
-                        break;
-                    }
-                }
-                
-                if (canSeek) {
-                    // Если целевое время уже в буфере - перематываем сразу
-                    videoElement.currentTime = targetTime;
-                } else {
-                    // Если не в буфере - показываем сообщение
-                    addChatMessage('Система', '⏳ Синхронизирую с хостом...', 'system');
-                    
-                    // Пробуем перемотать и надеемся, что подгрузится
-                    videoElement.currentTime = targetTime;
-                }
-                
-                // Синхронизируем воспроизведение
-                if (shouldBePlaying && videoElement.paused) {
-                    videoElement.play().catch(e => console.log('Ошибка воспроизведения:', e));
-                } else if (!shouldBePlaying && !videoElement.paused) {
-                    videoElement.pause();
-                }
-            } else if (currentVideoData.type === 'rutube') {
-                // Для Rutube плеера отправляем команды
-                controlRutubePlayer('seek', targetTime);
-                if (shouldBePlaying) {
-                    controlRutubePlayer('play');
-                } else {
-                    controlRutubePlayer('pause');
-                }
-            }
-            
-            // Сбрасываем флаг после задержки
-            setTimeout(() => {
-                isInternalChange = false;
-            }, 200);
-        }
-
-        // ==================== УНИВЕРСАЛЬНЫЙ ПАРСИНГ ВИДЕО ====================
+        // ==================== СИНХРОНИЗАЦИЯ ВИДЕО ====================
         function parseVideoUrl(url) {
             try {
-                // Нормализуем URL
-                let normalizedUrl = url
-                    .replace('vk.ru', 'vk.com')
-                    .replace('vkvideo.ru', 'vk.com');
+                const urlLower = url.toLowerCase();
                 
-                const urlObj = new URL(normalizedUrl);
-                
-                // 1. VK (все возможные форматы)
-                if (urlObj.hostname.includes('vk.com')) {
-                    let match = null;
-                    
-                    // Паттерн 1: /video-123456_789012
-                    match = urlObj.pathname.match(/\/video(-?\d+)_(\d+)/);
-                    
-                    // Паттерн 2: ?z=video-123456_789012
-                    if (!match) {
-                        const zParam = urlObj.searchParams.get('z');
-                        if (zParam) {
-                            const videoMatch = zParam.match(/video(-?\d+)_(\d+)/);
-                            if (videoMatch) match = videoMatch;
-                        }
-                    }
-                    
-                    // Паттерн 3: ?w=wall-123456_789012
-                    if (!match) {
-                        const wParam = urlObj.searchParams.get('w');
-                        if (wParam) {
-                            const videoMatch = wParam.match(/video(-?\d+)_(\d+)/);
-                            if (videoMatch) match = videoMatch;
-                        }
-                    }
-                    
-                    // Паттерн 4: /wall-123456_789012?video=123456_789012
-                    if (!match) {
-                        const videoParam = urlObj.searchParams.get('video');
-                        if (videoParam) {
-                            const videoMatch = videoParam.match(/(-?\d+)_(\d+)/);
-                            if (videoMatch) match = videoMatch;
-                        }
-                    }
-                    
-                    if (match) {
-                        return {
-                            type: 'vk',
-                            embedUrl: `https://vk.com/video_ext.php?oid=${match[1]}&id=${match[2]}&autoplay=1`,
-                            title: 'VK Видео',
-                            videoId: `${match[1]}_${match[2]}`,
-                            apiAvailable: true
-                        };
-                    }
+                // Прямые видео файлы
+                if (urlLower.match(/\.(mp4|webm|ogg|mov|avi)$/)) {
+                    return {
+                        type: 'direct',
+                        url: url,
+                        title: 'Видео'
+                    };
                 }
                 
-                // 2. Rutube (с поддержкой API)
-                if (urlObj.hostname.includes('rutube.ru')) {
-                    const match = urlObj.pathname.match(/\/video\/([a-zA-Z0-9]+)/);
+                // Rutube
+                if (urlLower.includes('rutube.ru')) {
+                    const match = url.match(/\/video\/([a-z0-9]+)/i);
                     if (match) {
                         return {
                             type: 'rutube',
                             embedUrl: `https://rutube.ru/play/embed/${match[1]}/`,
-                            title: 'Rutube Видео',
-                            videoId: match[1],
-                            apiAvailable: true
+                            title: 'Rutube видео'
                         };
                     }
                 }
                 
-                // 3. OK.ru
-                if (urlObj.hostname.includes('ok.ru') || urlObj.hostname.includes('odnoklassniki.ru')) {
-                    const match = urlObj.pathname.match(/\/video\/(\d+)/);
+                // VK
+                if (urlLower.includes('vk.com') || urlLower.includes('vkontakte.ru')) {
+                    const match = url.match(/video(-?\d+)_(\d+)/);
                     if (match) {
                         return {
-                            type: 'ok',
-                            embedUrl: `https://ok.ru/videoembed/${match[1]}`,
-                            title: 'OK Видео',
-                            videoId: match[1],
-                            apiAvailable: false
+                            type: 'vk',
+                            embedUrl: `https://vk.com/video_ext.php?oid=${match[1]}&id=${match[2]}&autoplay=1`,
+                            title: 'VK видео'
                         };
                     }
-                }
-                
-                // 4. Прямые ссылки на видео
-                if (url.match(/\.(mp4|webm|ogg|mov|avi)$/i)) {
-                    return {
-                        type: 'direct',
-                        embedUrl: url,
-                        title: 'Прямое видео',
-                        isDirect: true,
-                        apiAvailable: true
-                    };
                 }
                 
             } catch (e) {
                 console.error('Ошибка парсинга URL:', e);
             }
+            
             return null;
         }
 
-        // ==================== ЗАГРУЗКА ВИДЕО С АВТОВЫБОРОМ API ====================
-        function loadVideo(url, title = '') {
-            console.log(`📺 loadVideo вызвана. isHostUser=${isHostUser}, roomHostId=${roomHostId}, currentUser.id=${currentUser.id}, url=${url}`);
-            
-            const videoData = parseVideoUrl(url);
-            if (!videoData) {
-                alert('Неподдерживаемая ссылка');
-                return false;
-            }
-
-            currentVideoData = videoData;
-            console.log(`✅ Видео успешно распарсено: type=${videoData.type}, hasApiAvailable=${videoData.apiAvailable}`);
-
-            // Очищаем предыдущие плееры ИЗ ПАМЯТИ
-            if (videoElement) {
-                videoElement.pause();
-                videoElement.src = '';
-                videoElement = null;
-            }
-            
-            // Очищаем предыдущих слушателей Rutube
-            if (window.rutubeMessageHandler) {
-                window.removeEventListener('message', window.rutubeMessageHandler);
-                window.rutubeMessageHandler = null;
-            }
-
-            // Выбираем тип плеера на основе данных
-            if (videoData.type === 'direct') {
-                // Нативное видео - используем HTML5 video API
-                videoPlayer.style.display = 'none';
-                nativePlayer.style.display = 'block';
-                nativeVideo.src = videoData.embedUrl;
-                nativeVideo.load();
-                videoElement = nativeVideo;
-                setupNativeVideoListeners();
-                
-            } else if (videoData.type === 'rutube' && videoData.apiAvailable) {
-                // Rutube с полноценным API
-                nativePlayer.style.display = 'none';
-                videoPlayer.style.display = 'block';
-                videoPlayer.src = videoData.embedUrl;
-                videoElement = null;
-                setupRutubePlayer(videoData.videoId);
-                
-            } else if (videoData.type === 'vk') {
-                // VK плеер
-                nativePlayer.style.display = 'none';
-                videoPlayer.style.display = 'block';
-                videoPlayer.src = videoData.embedUrl;
-                videoElement = null;
-                setupVKPlayer(videoData.videoId);
-                
-            } else {
-                // Обычный iframe для остальных
-                nativePlayer.style.display = 'none';
-                videoPlayer.style.display = 'block';
-                videoPlayer.src = videoData.embedUrl;
-                videoElement = null;
-            }
-
-            currentVideoTitle.textContent = title || videoData.title || 'Видео';
-
-            // ЗАГРУЖАЕМ ПЛЕЕР ВСЕГДА (у обоих пользователей)
-            // Но ОТПРАВЛЯЕМ в Firebase только если хост
-            if (currentUser.roomId && videoStateRef && isHostUser) {
-                console.log('📤 ХОСТ отправляет видео в базу');
-                videoStateRef.update({
-                    url: url,
-                    embedUrl: videoData.embedUrl,
-                    title: currentVideoTitle.textContent,
-                    type: videoData.type,
-                    isDirect: videoData.isDirect || false,
-                    videoId: videoData.videoId || null,
-                    apiAvailable: videoData.apiAvailable || false,
-                    isPlaying: false,
-                    currentTime: 0,
-                    updatedBy: currentUser.id,
-                    updatedAt: firebase.database.ServerValue.TIMESTAMP
-                });
-            } else if (currentUser.roomId && !isHostUser) {
-                console.log('👥 ЗРИТЕЛЬ загружает видео локально (не отправляет в БД)');
-            }
-
-            addChatMessage('Система', `🎬 Загружено: ${currentVideoTitle.textContent} (${videoData.type})`, 'system');
-            return true;
-        }
-
-        // ==================== RUTUBE PLAYER API (ИСПРАВЛЕННЫЙ) ====================
-        function setupRutubePlayer(videoId) {
-            console.log('🎬 Настройка Rutube плеера с API');
-            
-            // Сохраняем обработчик глобально для последующего удаления
-            window.rutubeMessageHandler = function(event) {
-                try {
-                    // Пропускаем, если это не объект
-                    if (typeof event.data !== 'string') return;
-                    
-                    const message = JSON.parse(event.data);
-                    
-                    // Логируем только значимые события
-                    if (!['player:currentTime', 'player:init'].includes(message.type)) {
-                        console.log('📡 Rutube event:', message.type);
-                    }
-                    
-                    const now = Date.now();
-                    
-                    // КРИТИЧНО: Только хост отправляет команды!
-                    // Остальные только слушают
-                    if (!isHostUser) {
-                        console.log('👥 Я зритель - только слушаю, не отправляю');
-                        return;
-                    }
-                    
-                    // Игнорируем свои команды (если мы только что отправили команду)
-                    if (now - lastCommandTime < 500) {
-                        console.log('⏭️ Игнорирую - только что отправили команду');
-                        return;
-                    }
-                    
-                    // Игнорируем слишком частые currentTime события (дебаунс)
-                    if (message.type === 'player:currentTime') {
-                        if (now - lastRutubeUpdateTime < 1000) {
-                            return;
-                        }
-                        lastRutubeUpdateTime = now;
-                    }
-                    
-                    switch (message.type) {
-                        case 'player:ready':
-                            console.log('✅ Rutube плеер готов');
-                            break;
-                            
-                        case 'player:changeState':
-                            // КРИТИЧНО: Только хост отправляет команды!
-                            if (!isHostUser) {
-                                console.log('❌ Я не хост - перехватываю changeState но не отправляю');
-                                return;
-                            }
-                            
-                            if (message.data && (message.data.state === 'playing' || message.data.state === 'pause')) {
-                                const isPlaying = message.data.state === 'playing';
-                                rutubePlayerIsPlaying = isPlaying; // Сохраняем состояние
-                                
-                                getRutubeCurrentTime().then(time => {
-                                    if (currentUser.roomId && videoStateRef) {
-                                        console.log(`📤 ХОСТ отправляет ${isPlaying ? '▶️ play' : '⏸️ pause'} команду`);
-                                        lastCommandTime = now;
-                                        videoStateRef.update({
-                                            command: isPlaying ? 'play' : 'pause',
-                                            isPlaying: isPlaying,
-                                            currentTime: time,
-                                            updatedBy: currentUser.id,
-                                            timestamp: firebase.database.ServerValue.TIMESTAMP
-                                        });
-                                    }
-                                });
-                            }
-                            break;
-                            
-                        case 'player:currentTime':
-                            // Только хост обновляет текущее время
-                            // НЕ отправляем isPlaying здесь - только при changeState событии!
-                            // currentTime приходит ДО changeState, поэтому состояние будет старым
-                            if (isHostUser && currentUser.roomId && videoStateRef && message.data) {
-                                videoStateRef.update({
-                                    currentTime: message.data.time,
-                                    // isPlaying НЕ обновляем - это делается в changeState
-                                    updatedBy: currentUser.id
-                                });
-                            }
-                            break;
-                    }
-                } catch (e) {
-                    // Молча игнорируем ошибки парсинга (могут быть другие события)
-                }
-            };
-            
-            window.addEventListener('message', window.rutubeMessageHandler);
-            
-            // КРИТИЧНО: После установки слушателя, запросим текущее состояние плеера
-            // Это гарантирует што видео будет загружено для всех (и хоста и гостей)
-            setTimeout(() => {
-                if (videoPlayer && videoPlayer.contentWindow) {
-                    videoPlayer.contentWindow.postMessage(JSON.stringify({
-                        type: 'player:getCurrentTime'
-                    }), '*');
-                    console.log('🔍 Запросил текущее время у Rutube плеера');
-                }
-            }, 500);
-        }
-
-        function getRutubeCurrentTime() {
-            return new Promise((resolve) => {
-                if (!videoPlayer || !videoPlayer.contentWindow) {
-                    console.log('⚠️ Rutube плеер не готов, возвращаю 0');
-                    resolve(0);
-                    return;
-                }
-                
-                try {
-                    videoPlayer.contentWindow.postMessage(JSON.stringify({
-                        type: 'player:getCurrentTime'
-                    }), '*');
-                } catch (e) {
-                    console.log('⚠️ Ошибка при запросе времени Rutube:', e);
-                    resolve(0);
-                    return;
-                }
-                
-                const timeout = setTimeout(() => resolve(0), 1000);
-                
-                const handler = (event) => {
-                    try {
-                        const message = JSON.parse(event.data);
-                        if (message.type === 'player:currentTime' && message.data) {
-                            window.removeEventListener('message', handler);
-                            clearTimeout(timeout);
-                            resolve(message.data.time || 0);
-                        }
-                    } catch (e) {}
-                };
-                
-                window.addEventListener('message', handler);
-            });
-        }
-        
-        // НОВАЯ ФУНКЦИЯ: Получить реальное состояние плеера Rutube (playing или pause)
-        function getRutubePlayerState() {
-            return new Promise((resolve) => {
-                // Возвращаем последнее известное состояние плеера
-                // (оно обновляется при каждом changeState событии)
-                resolve(rutubePlayerIsPlaying);
-            });
-        }
-
-        function controlRutubePlayer(command, value = null) {
-            if (!videoPlayer || !videoPlayer.contentWindow) {
-                console.log('⚠️ Rutube плеер не загружен или нет доступа, переупробуем через 500мс');
-                setTimeout(() => controlRutubePlayer(command, value), 500);
+        function loadVideo(url) {
+            if (!state.isLeader) {
+                alert('Только ведущий может загружать видео!');
                 return;
             }
             
-            console.log(`📺 Отправляю Rutube команду: ${command}, значение: ${value}`);
-            
-            let message = {};
-            
-            switch (command) {
-                case 'play':
-                    message = { type: 'player:play' };
-                    console.log('▶️ Отправляю play команду');
-                    break;
-                case 'pause':
-                    message = { type: 'player:pause' };
-                    console.log('⏸️ Отправляю pause команду');
-                    break;
-                case 'seek':
-                    message = { 
-                        type: 'player:setCurrentTime',
-                        data: { time: value }
-                    };
-                    console.log(`⏪ Отправляю seek команду на ${value}с`);
-                    break;
-                default:
-                    return;
+            const videoData = parseVideoUrl(url);
+            if (!videoData) {
+                alert('Неподдерживаемая ссылка. Используйте:\n- Прямые MP4/WebM ссылки\n- Rutube\n- VK');
+                return;
             }
             
-            try {
-                videoPlayer.contentWindow.postMessage(JSON.stringify(message), '*');
-                showSyncStatus(true, true);
-            } catch (e) {
-                console.error('Ошибка отправки команды Rutube:', e);
+            state.currentVideoData = videoData;
+            elements.currentVideoTitle.textContent = videoData.title;
+            
+            // Отправляем команду ведущего на загрузку видео
+            socket.emit('video-command', {
+                action: 'load',
+                url: url,
+                title: videoData.title,
+                type: videoData.type
+            });
+            
+            // Загружаем локально
+            renderVideo(videoData);
+            setupVideoListeners();
+            
+            elements.urlInput.value = '';
+            addSystemMessage(`🎬 ВЕДУЩИЙ загрузил: ${videoData.title}`);
+        }
+
+        function renderVideo(videoData) {
+            if (videoData.type === 'direct') {
+                elements.nativeVideo.style.display = 'block';
+                elements.videoPlayer.style.display = 'none';
+                elements.nativeVideo.src = videoData.url;
+                elements.nativeVideo.load();
+            } else {
+                elements.videoPlayer.style.display = 'block';
+                elements.nativeVideo.style.display = 'none';
+                elements.videoPlayer.src = videoData.embedUrl;
             }
         }
 
-        // ==================== VK PLAYER ====================
-        function setupVKPlayer(videoId) {
-            console.log('Настройка VK плеера');
+        function setupVideoListeners() {
+            if (!elements.nativeVideo) return;
             
-            // Периодически проверяем состояние VK плеера
-            setInterval(() => {
-                if (!currentUser.roomId || !videoPlayer || !videoPlayer.contentWindow) return;
-                
-                // Пытаемся получить состояние через postMessage
-                videoPlayer.contentWindow.postMessage({
-                    type: 'getState'
-                }, '*');
-            }, 5000);
-        }
-
-        // ==================== ИСПРАВЛЕННЫЙ НАТИВНЫЙ ВИДЕО ПЛЕЕР ====================
-        function setupNativeVideoListeners() {
-            if (!videoElement) return;
-
+            const video = elements.nativeVideo;
             let seekTimeout;
-
-            // Пауза - отправляем КОМАНДУ (ТОЛЬКО ЕСЛИ МЫ ХОСТ)
-            videoElement.addEventListener('pause', () => {
-                if (!isHostUser) {
-                    console.log('👥 Я зритель - не отправляю команду паузы');
+            
+            video.addEventListener('play', () => {
+                if (!state.isLeader || state.ignoreNextSync) {
+                    state.ignoreNextSync = false;
                     return;
                 }
                 
-                if (!currentUser.roomId || !videoStateRef || isInternalChange) {
-                    isInternalChange = false;
-                    return;
-                }
+                if (!state.roomId) return;
                 
-                console.log('⏸️ ХОСТ отправляет паузу команду');
-                lastCommandTime = Date.now();
-                videoStateRef.update({
-                    command: 'pause',
-                    isPlaying: false,
-                    currentTime: videoElement.currentTime,
-                    updatedBy: currentUser.id,
-                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                console.log('▶️ ВЕДУЩИЙ отправляет play');
+                socket.emit('video-command', {
+                    action: 'play',
+                    time: video.currentTime
                 });
             });
-
-            // Воспроизведение - отправляем КОМАНДУ (ТОЛЬКО ЕСЛИ МЫ ХОСТ)
-            videoElement.addEventListener('play', () => {
-                if (!isHostUser) {
-                    console.log('👥 Я зритель - не отправляю команду play');
+            
+            video.addEventListener('pause', () => {
+                if (!state.isLeader || state.ignoreNextSync) {
+                    state.ignoreNextSync = false;
                     return;
                 }
                 
-                if (!currentUser.roomId || !videoStateRef || isInternalChange) {
-                    isInternalChange = false;
-                    return;
-                }
+                if (!state.roomId) return;
                 
-                console.log('▶️ ХОСТ отправляет play команду');
-                lastCommandTime = Date.now();
-                videoStateRef.update({
-                    command: 'play',
-                    isPlaying: true,
-                    currentTime: videoElement.currentTime,
-                    updatedBy: currentUser.id,
-                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                console.log('⏸️ ВЕДУЩИЙ отправляет pause');
+                socket.emit('video-command', {
+                    action: 'pause',
+                    time: video.currentTime
                 });
             });
-
-            // Перемотка - отправляем КОМАНДУ (ТОЛЬКО ЕСЛИ МЫ ХОСТ)
-            videoElement.addEventListener('seeked', () => {
-                if (!isHostUser) {
-                    console.log('👥 Я зритель - не отправляю команду seek');
+            
+            video.addEventListener('seeked', () => {
+                if (!state.isLeader || state.ignoreNextSync) {
+                    state.ignoreNextSync = false;
                     return;
                 }
                 
-                if (!currentUser.roomId || !videoStateRef || isInternalChange) {
-                    isInternalChange = false;
-                    return;
-                }
+                if (!state.roomId) return;
                 
                 clearTimeout(seekTimeout);
                 seekTimeout = setTimeout(() => {
-                    console.log(`⏪ ХОСТ отправляет seek на ${videoElement.currentTime}с`);
-                    lastCommandTime = Date.now();
-                    videoStateRef.update({
-                        command: 'seek',
-                        currentTime: videoElement.currentTime,
-                        updatedBy: currentUser.id,
-                        timestamp: firebase.database.ServerValue.TIMESTAMP
+                    console.log(`⏪ ВЕДУЩИЙ отправляет seek на ${video.currentTime.toFixed(1)}s`);
+                    socket.emit('video-command', {
+                        action: 'seek',
+                        time: video.currentTime
                     });
                 }, 300);
             });
-
-            // Прогресс бар
-            videoElement.addEventListener('timeupdate', () => {
-                if (!videoElement) return;
-                const percent = (videoElement.currentTime / videoElement.duration) * 100;
-                updateSyncProgress(percent);
-            });
-
-            // Периодическое обновление (ТОЛЬКО ХОСТ отправляет состояние видео)
-            if (syncInterval) clearInterval(syncInterval);
-            syncInterval = setInterval(() => {
-                if (!isHostUser) return; // Только хост отправляет
-                
-                if (videoElement && currentUser.roomId && videoStateRef) {
-                    // Проверяем, не было ли недавно команд (в последние 3 секунды)
-                    const now = Date.now();
-                    if (!lastCommandTime || now - lastCommandTime > 3000) {
-                        // Отправляем только состояние, без команды
-                        videoStateRef.update({
-                            currentTime: videoElement.currentTime,
-                            isPlaying: !videoElement.paused,
-                            updatedBy: currentUser.id
-                        });
-                    }
-                }
-            }, 5000);
         }
 
-        // ==================== FIREBASE КОМНАТЫ ====================
-        function createRoom() {
-            const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
+        function applyVideoCommand(data) {
+            const video = elements.nativeVideo;
             
-            if (roomRef) roomRef.off();
-            if (syncInterval) clearInterval(syncInterval);
-            
-            roomRef = database.ref(`rooms/${roomId}`);
-            usersRef = database.ref(`rooms/${roomId}/users`);
-            videoStateRef = database.ref(`rooms/${roomId}/video`);
-            chatRef = database.ref(`rooms/${roomId}/messages`);
-            
-            roomRef.set({
-                createdAt: firebase.database.ServerValue.TIMESTAMP,
-                hostId: currentUser.id,
-                users: {
-                    [currentUser.id]: {
-                        name: currentUser.name,
-                        joinedAt: firebase.database.ServerValue.TIMESTAMP,
-                        isHost: true
-                    }
-                },
-                video: {
-                    url: '',
-                    embedUrl: '',
-                    title: '',
-                    isPlaying: false,
-                    currentTime: 0,
-                    command: '',
-                    updatedBy: null
-                }
-            }).then(() => {
-                currentUser.roomId = roomId;
-                currentUser.isHost = true;
-                roomHostId = currentUser.id; // Сохраняем ID хоста
+            if (data.type === 'direct' && video) {
+                state.ignoreNextSync = true;
                 
-                joinRoomSuccess(roomId);
-                setupRoomListeners(roomId);
-            }).catch(error => {
-                console.error('Ошибка создания комнаты:', error);
-                alert('Ошибка создания комнаты');
-            });
-        }
-
-        function joinRoom(roomId) {
-            roomRef = database.ref(`rooms/${roomId}`);
-            usersRef = database.ref(`rooms/${roomId}/users`);
-            videoStateRef = database.ref(`rooms/${roomId}/video`);
-            chatRef = database.ref(`rooms/${roomId}/messages`);
-            
-            roomRef.once('value').then((snapshot) => {
-                if (snapshot.exists()) {
-                    // Получаем ID хоста из комнаты
-                    roomHostId = snapshot.val().hostId;
-                    
-                    usersRef.child(currentUser.id).set({
-                        name: currentUser.name,
-                        joinedAt: firebase.database.ServerValue.TIMESTAMP,
-                        isHost: false
-                    }).then(() => {
-                        currentUser.roomId = roomId;
-                        currentUser.isHost = false;
-                        
-                        joinRoomSuccess(roomId);
-                        setupRoomListeners(roomId);
-                    });
-                } else {
-                    alert('Комната не найдена');
-                }
-            }).catch(error => {
-                console.error('Ошибка подключения к комнате:', error);
-                alert('Ошибка подключения');
-            });
-        }
-
-        function joinRoomSuccess(roomId) {
-            currentRoomIdSpan.textContent = roomId;
-            roomInfo.style.display = 'flex';
-            
-            // КРИТИЧЕСКИ: Установить флаг хоста для синхронизации
-            isHostUser = currentUser.isHost;
-            
-            createRoomBtn.disabled = true;
-            joinRoomBtn.disabled = true;
-            roomIdInput.disabled = true;
-            leaveRoomBtn.style.display = 'inline-block';
-            chatInput.disabled = false;
-            sendMessageBtn.disabled = false;
-            
-            roomIdInput.value = '';
-            
-            if (currentUser.isHost) {
-                addChatMessage('Система', '✅ Вы создали комнату и управляете видео (вы ХОСТ)', 'system');
-                console.log('🎬 Я ХОСТ - я управляю видео');
-            } else {
-                addChatMessage('Система', '👥 Вы подключились как зритель (видео управляет ХОСТ)', 'system');
-                console.log('👥 Я ЗРИТЕЛЬ - синхронизирую с хостом');
-                
-                // КРИТИЧНО для гостей: загрузить текущее видео хоста если оно есть
-                if (videoStateRef) {
-                    videoStateRef.once('value').then((snapshot) => {
-                        const videoData = snapshot.val();
-                        if (videoData && videoData.url) {
-                            console.log('📺 ГОСТЬ загружает видео хоста при присоединении:', videoData.url);
-                            loadVideo(videoData.url, videoData.title);
-                            
-                            // Если видео уже воспроизводится - спросим у хоста актуальное состояние
-                            if (videoData.isPlaying) {
-                                console.log('▶️ Видео уже воспроизводится, ставлю на паузу до синхронизации');
-                                // applyVideoCommand будет вызван quando videoStateRef обновится
-                            }
-                        }
-                    });
+                switch (data.action) {
+                    case 'play':
+                        video.currentTime = data.time;
+                        video.play().catch(e => console.log('Ошибка play:', e));
+                        break;
+                    case 'pause':
+                        video.currentTime = data.time;
+                        video.pause();
+                        break;
+                    case 'seek':
+                        video.currentTime = data.time;
+                        break;
                 }
             }
-            
-            // Запускаем периодическую проверку для всех (включая хоста)
-            startPeriodicSyncCheck();
-            addChatMessage('Система', '⏱️ Проверка синхронизации каждые 15 секунд (допуск 5с)', 'system');
         }
 
-        function leaveRoom() {
-            if (!currentUser.roomId) return;
+        function checkAndCorrectSync(data) {
+            const video = elements.nativeVideo;
+            if (!video || !state.currentVideoData || state.currentVideoData.type !== 'direct') return;
             
-            // Очищаем интервалы
-            if (syncCheckInterval) {
-                clearInterval(syncCheckInterval);
-                syncCheckInterval = null;
+            const diff = Math.abs(video.currentTime - data.expectedTime);
+            if (diff > 2) { // Допуск 2 секунды
+                console.log(`⚠️ Рассинхрон ${diff.toFixed(1)}s, корректирую`);
+                gentleSync(data.expectedTime);
             }
-            
-            if (syncInterval) {
-                clearInterval(syncInterval);
-                syncInterval = null;
-            }
-            
-            if (usersRef) {
-                usersRef.child(currentUser.id).remove();
-            }
-            
-            if (currentUser.isHost && roomRef) {
-                roomRef.remove();
-            }
-            
-            if (roomRef) roomRef.off();
-            if (usersRef) usersRef.off();
-            if (videoStateRef) videoStateRef.off();
-            if (chatRef) chatRef.off();
-            
-            // Очищаем слушатель Rutube
-            if (window.rutubeMessageHandler) {
-                window.removeEventListener('message', window.rutubeMessageHandler);
-                window.rutubeMessageHandler = null;
-            }
-            
-            // Очищаем видео элемент
-            if (videoElement) {
-                videoElement.pause();
-                videoElement.src = '';
-                videoElement = null;
-            }
-            
-            currentUser.roomId = null;
-            currentUser.isHost = false;
-            currentVideoData = null;
-            roomHostId = null;
-            isHostUser = false;
-            
-            createRoomBtn.disabled = false;
-            joinRoomBtn.disabled = false;
-            roomIdInput.disabled = false;
-            leaveRoomBtn.style.display = 'none';
-            roomInfo.style.display = 'none';
-            chatInput.disabled = true;
-            sendMessageBtn.disabled = true;
-            
-            videoPlayer.src = '';
-            nativeVideo.src = '';
-            nativePlayer.style.display = 'none';
-            videoPlayer.style.display = 'block';
-            currentVideoTitle.textContent = 'Вставьте ссылку на видео';
-            updateSyncProgress(0);
-            
-            addChatMessage('Система', '👋 Вы покинули комнату', 'system');
         }
 
-        // ==================== ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ КОМНАТЫ ====================
-        function setupRoomListeners(roomId) {
-            console.log(`📡 Устанавливаю слушатели комнаты. Мой ID: ${currentUser.id}`);
+        function gentleSync(targetTime) {
+            const video = elements.nativeVideo;
+            if (!video) return;
             
-            // Слушаем пользователей
-            usersRef.on('value', (snapshot) => {
-                const users = snapshot.val() || {};
-                const userCount = Object.keys(users).length;
-                onlineCount.textContent = `${userCount} онлайн`;
-                
-                // ИСПРАВЛЕНО: Правильно определяем хоста один раз
-                let actualHostId = null;
-                let hostName_temp = '';
-                guestBadge.style.display = 'none';
-                
-                Object.entries(users).forEach(([id, user]) => {
-                    if (user.isHost) {
-                        actualHostId = id;
-                        hostName_temp = user.name;
-                    } else {
-                        guestName.textContent = user.name;
-                        guestBadge.style.display = 'flex';
-                    }
-                });
-                
-                // Обновляем ID хоста один раз
-                if (actualHostId) {
-                    roomHostId = actualHostId;
-                    hostName.textContent = hostName_temp;
-                    // ИСПРАВЛЕНО: Обновляем флаг на основе ID, а не boolean из БД
-                    isHostUser = (currentUser.id === roomHostId);
-                    console.log(`🔐 Определен ХОСТ: ${hostName_temp} (ID: ${actualHostId}), я хост? ${isHostUser}`);
-                }
-                
-                if (!actualHostId && currentUser.roomId) {
-                    alert('Хост покинул комнату');
-                    leaveRoom();
-                }
-            });
-
-            // ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ ВИДЕО
-            videoStateRef.on('value', (snapshot) => {
-                const videoData = snapshot.val();
-                if (!videoData) return;
-                
-                console.log('📡 Получены данные видео от Firebase:', {
-                    command: videoData.command,
-                    currentTime: videoData.currentTime,
-                    isPlaying: videoData.isPlaying,
-                    updatedBy: videoData.updatedBy,
-                    currentUserId: currentUser.id,
-                    amIHost: isHostUser
-                });
-                
-                // Загружаем видео, если его еще нет
-                if (videoData.url && (!currentVideoTitle.textContent || currentVideoTitle.textContent === 'Вставьте ссылку на видео')) {
-                    console.log('🎬 Загружаю новое видео');
-                    loadVideo(videoData.url, videoData.title);
-                }
-                
-                // ИСПРАВЛЕНО: Проверяем, кто отправил команду
-                // Игнорируем свои собственные команды (пришедшие из Firebase после отправки)
-                if (videoData.updatedBy === currentUser.id) {
-                    console.log('🔄 Это моя команда из Firebase - игнорирую');
-                    return;
-                }
-                
-                // Если нет команды - это просто обновление состояния
-                if (!videoData.command) {
-                    console.log('ℹ️ Только обновление состояния без команды');
-                    return;
-                }
-                
-                console.log(`✅ Применяю команду: ${videoData.command}`);
-                
-                // Применяем команду одинаково для всех типов плееров
-                applyVideoCommand(videoData);
-            });
-
-            // Слушаем чат
-            chatRef.limitToLast(50).on('child_added', (snapshot) => {
-                const message = snapshot.val();
-                if (message && message.userId !== currentUser.id) {
-                    displayMessage(message);
-                }
-            });
+            state.ignoreNextSync = true;
+            video.currentTime = targetTime;
+            setTimeout(() => {
+                state.ignoreNextSync = false;
+            }, 200);
         }
 
-        // ==================== ЧАТ ====================
-        function sendMessage(text) {
-            if (!currentUser.roomId || !text.trim()) return;
-            
-            const message = {
-                userId: currentUser.id,
-                userName: currentUser.name,
-                text: text.trim(),
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            };
-            
-            chatRef.push(message).then(() => {
-                displayMessage(message, true);
-            });
-            
-            database.ref(`rooms/${currentUser.roomId}/typing`).remove();
-        }
-
-        function displayMessage(message, isOwn = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isOwn ? 'own' : (message.userId === 'system' ? 'system' : 'other')}`;
-            
-            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            
-            if (message.userId === 'system') {
-                messageDiv.innerHTML = `
-                    <div class="text">${message.text}</div>
-                    <div class="time">${time}</div>
-                `;
-            } else {
-                messageDiv.innerHTML = `
-                    <div class="sender">${isOwn ? 'Вы' : message.userName}</div>
-                    <div class="text">${message.text}</div>
-                    <div class="time">${time}</div>
-                `;
-            }
-            
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function addChatMessage(sender, text, type = 'system') {
-            displayMessage({
-                userId: 'system',
-                userName: sender,
-                text: text
-            });
-        }
-
-        // ==================== ИНИЦИАЛИЗАЦИЯ ====================
-        updateConnectionStatus(true);
-
-        database.ref('.info/connected').on('value', (snapshot) => {
-            updateConnectionStatus(snapshot.val() === true);
+        // ==================== ОБРАБОТЧИКИ КНОПОК ====================
+        elements.createRoomBtn.addEventListener('click', () => {
+            createRoom();
         });
 
-        // Обработчики кнопок
-        createRoomBtn.addEventListener('click', createRoom);
-        
-        joinRoomBtn.addEventListener('click', () => {
-            const roomId = roomIdInput.value.trim().toUpperCase();
+        elements.joinRoomBtn.addEventListener('click', () => {
+            const roomId = elements.roomIdInput.value.trim();
             if (roomId) {
                 joinRoom(roomId);
             } else {
                 alert('Введите ID комнаты');
             }
         });
-        
-        leaveRoomBtn.addEventListener('click', leaveRoom);
-        
-        copyRoomIdBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(currentRoomIdSpan.textContent).then(() => {
-                alert('ID комнаты скопирован');
-            }).catch(() => {
-                alert('Не удалось скопировать ID');
+
+        elements.leaveRoomBtn.addEventListener('click', () => {
+            leaveRoom();
+        });
+
+        elements.copyRoomIdBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(elements.currentRoomId.textContent).then(() => {
+                alert('ID скопирован!');
             });
         });
 
-        loadUrlBtn.addEventListener('click', () => {
-            if (!isHostUser) {
-                alert('Только хост может загружать видео');
-                return;
+        elements.loadUrlBtn.addEventListener('click', () => {
+            loadVideo(elements.urlInput.value.trim());
+        });
+
+        elements.urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') elements.loadUrlBtn.click();
+        });
+
+        elements.syncNowBtn.addEventListener('click', () => {
+            if (state.isLeader) {
+                socket.emit('request-sync', { clientTime: Date.now() });
             }
-            
-            const url = urlInput.value.trim();
-            if (url) {
-                if (!currentUser.roomId) {
-                    alert('Сначала создайте комнату');
-                    return;
-                }
-                loadVideo(url);
-                urlInput.value = '';
+            showSyncStatus(true);
+        });
+
+        elements.sendMessageBtn.addEventListener('click', () => {
+            const text = elements.chatInput.value.trim();
+            if (text) {
+                socket.emit('send-chat-message', { message: text });
+                addChatMessage(state.username, text, true);
+                elements.chatInput.value = '';
             }
         });
 
-        urlInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') loadUrlBtn.click();
+        elements.chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') elements.sendMessageBtn.click();
         });
 
-        syncNowBtn.addEventListener('click', () => {
-            if (currentUser.roomId && videoStateRef && currentVideoData) {
-                if (currentVideoData.type === 'direct' && videoElement) {
-                    videoStateRef.update({
-                        command: 'seek',
-                        currentTime: videoElement.currentTime,
-                        isPlaying: !videoElement.paused,
-                        updatedBy: currentUser.id,
-                        timestamp: firebase.database.ServerValue.TIMESTAMP
-                    });
-                } else if (currentVideoData.type === 'rutube') {
-                    getRutubeCurrentTime().then(time => {
-                        videoStateRef.update({
-                            command: 'seek',
-                            currentTime: time,
-                            isPlaying: true,
-                            updatedBy: currentUser.id,
-                            timestamp: firebase.database.ServerValue.TIMESTAMP
-                        });
-                    });
-                }
-                showSyncStatus(true);
-            }
-        });
-
-        // Чат
-        sendMessageBtn.addEventListener('click', () => {
-            sendMessage(chatInput.value);
-            chatInput.value = '';
-        });
-
-        chatInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendMessage(chatInput.value);
-                chatInput.value = '';
-            }
-            
-            if (currentUser.roomId) {
-                database.ref(`rooms/${currentUser.roomId}/typing`).set({
-                    userId: currentUser.id,
-                    userName: currentUser.name,
-                    timestamp: firebase.database.ServerValue.TIMESTAMP
-                });
-                
-                clearTimeout(window.typingTimeout);
-                window.typingTimeout = setTimeout(() => {
-                    database.ref(`rooms/${currentUser.roomId}/typing`).remove();
-                }, 2000);
-            }
-        });
+        // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+        updateConnectionStatus(false);
+        addSystemMessage('👋 Добро пожаловать в CINEMATE v2.0!');
+        addSystemMessage('🎬 Создайте комнату или введите ID существующей');
 
         window.addEventListener('beforeunload', () => {
-            if (currentUser.roomId) {
+            if (state.roomId) {
                 leaveRoom();
             }
         });
-
-        addChatMessage('Система', '👋 Добро пожаловать!', 'system');
     </script>
 </body>
 </html>
