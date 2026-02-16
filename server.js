@@ -3,6 +3,8 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const https = require('https');
+const { URL } = require('url');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,7 +30,7 @@ app.use(express.static(path.join(__dirname, '.')));
 
 // ============= ХРАНИЛИЩЕ ДАННЫХ =============
 const rooms = new Map();
-const urlCache = new Map();
+const urlCache = new Map(); // Кеширование временных ссылок (60 мин)
 
 class Room {
     constructor(roomId) {
@@ -90,7 +92,7 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО =============
+// ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО (с кешированием и лучшим выбором форматов) =============
 app.post('/api/extract', async (req, res) => {
     const { url } = req.body;
     
@@ -101,12 +103,14 @@ app.post('/api/extract', async (req, res) => {
     try {
         console.log(`🔍 Извлечение видео из: ${url}`);
 
-        // Проверка кеша
+        // ✅ ПРОВЕРКА КЕША (производительность)
         if (urlCache.has(url)) {
             const cached = urlCache.get(url);
-            if (Date.now() - cached.timestamp < 3600000) {
+            if (Date.now() - cached.timestamp < 3600000) { // 60 минут
                 console.log('✅ Использован кеш');
                 return res.json(cached.data);
+            } else {
+                urlCache.delete(url);
             }
         }
 
@@ -128,7 +132,6 @@ app.post('/api/extract', async (req, res) => {
             youtubedl = require('youtube-dl-exec');
         } catch (e) {
             console.log('⚠️ yt-dlp не установлен, используем fallback');
-            // Fallback - возвращаем оригинальный URL
             const result = {
                 url: url,
                 title: 'Видео',
@@ -138,61 +141,100 @@ app.post('/api/extract', async (req, res) => {
             return res.json(result);
         }
 
-        // Используем yt-dlp
-        const info = await youtubedl(url, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            noCheckCertificate: true,
-            preferFreeFormats: true,
-            skipDownload: true,
-            socketTimeout: 30000
-        });
+        // Используем yt-dlp с таймаутом
+        const info = await Promise.race([
+            youtubedl(url, {
+                dumpSingleJson: true,
+                noWarnings: true,
+                noCheckCertificate: true,
+                preferFreeFormats: true,
+                skipDownload: true,
+                socketTimeout: 30000
+            }),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('youtube-dl request timeout')), 45000)
+            )
+        ]);
 
-        let directUrl = null;
+        if (!info) {
+            return res.status(422).json({ error: 'no_info' });
+        }
+
+        // ✅ ЛУЧШИЙ ВЫБОР ФОРМАТОВ (качество видео)
+        let directUrl = info.url || null;
         let title = info.title || 'Видео';
         let type = 'direct';
-
-        // Получаем прямую ссылку
-        if (info.url && info.url.startsWith('http')) {
-            directUrl = info.url;
-        } else if (info.formats && Array.isArray(info.formats)) {
-            const format = info.formats
-                .filter(f => f.url && f.url.startsWith('http'))
-                .sort((a, b) => {
-                    const getPriority = (ext) => {
-                        if (ext === 'mp4') return 3;
-                        if (ext === 'webm') return 2;
-                        return 1;
-                    };
-                    return getPriority(b.ext) - getPriority(a.ext);
-                })[0];
+        
+        if ((!directUrl || !directUrl.startsWith('http')) && Array.isArray(info.formats)) {
+            // Фильтруем форматы с URL
+            const availableFormats = info.formats.filter(f => f.url && f.url.startsWith('http'));
             
-            if (format) {
-                directUrl = format.url;
-                if (format.url.includes('.m3u8')) type = 'hls';
+            if (availableFormats.length > 0) {
+                // ✅ СОРТИРОВКА: видео с аудио > видео без аудио, затем по размеру
+                const sorted = availableFormats.sort((a, b) => {
+                    const aHasAudio = a.acodec && a.acodec !== 'none';
+                    const bHasAudio = b.acodec && b.acodec !== 'none';
+                    
+                    if (aHasAudio !== bHasAudio) {
+                        return aHasAudio ? -1 : 1;
+                    }
+                    
+                    return (b.filesize || 0) - (a.filesize || 0);
+                });
+
+                // ✅ ПРЕДПОЧТЕНИЕ: mp4/webm
+                const preferred = sorted.find(f => {
+                    const ext = (f.ext || '').toLowerCase();
+                    return ['mp4', 'webm', 'mov', 'mkv'].includes(ext);
+                }) || sorted[0];
+
+                if (preferred && preferred.url) {
+                    directUrl = preferred.url;
+                    if (preferred.url.includes('.m3u8')) type = 'hls';
+                }
             }
         }
 
         if (!directUrl) {
-            directUrl = url;
-            type = 'embed';
+            console.log(`⚠️ Не найдена прямая ссылка для ${url}`);
+            return res.status(422).json({ error: 'no_direct_url' });
         }
 
-        const result = {
-            url: directUrl,
-            title: title,
-            type: type
+        const result = { 
+            url: directUrl, 
+            title: title, 
+            type: type,
+            extractor: info.extractor || null,
+            duration: info.duration || null 
         };
 
-        urlCache.set(url, { data: result, timestamp: Date.now() });
-        console.log(`✅ Извлечено: ${title}`);
-        res.json(result);
+        // ✅ СОХРАНЯЕМ В КЕШ
+        urlCache.set(url, {
+            data: result,
+            timestamp: Date.now()
+        });
 
-    } catch (error) {
-        console.error('❌ Ошибка:', error.message);
+        console.log(`✅ Извлечена ссылка для ${title}`);
+        return res.json(result);
+
+    } catch (err) {
+        console.error('❌ extract error:', err.message);
+        
+        // ✅ ДЕТАЛИЗАЦИЯ ОШИБОК
+        if (err.message.includes('not found')) {
+            return res.status(404).json({ error: 'video_not_found' });
+        } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
+            return res.status(429).json({ error: 'rate_limited' });
+        } else if (err.message.includes('403') || err.message.includes('Forbidden')) {
+            return res.status(403).json({ error: 'access_forbidden' });
+        } else if (err.message.includes('unavailable') || err.message.includes('not available')) {
+            return res.status(410).json({ error: 'content_unavailable' });
+        } else if (err.message.includes('timeout')) {
+            return res.status(408).json({ error: 'request_timeout' });
+        }
         
         // Fallback при ошибке
-        res.json({
+        return res.json({
             url: url,
             title: 'Видео',
             type: 'embed'
@@ -200,18 +242,66 @@ app.post('/api/extract', async (req, res) => {
     }
 });
 
-// ============= STREAM PROXY =============
+// ============= STREAM PROXY (с SSRF защитой и поддержкой Range) =============
 app.get('/stream', (req, res) => {
     const videoUrl = req.query.url;
-    if (!videoUrl) return res.status(400).send('URL не указан');
+    if (!videoUrl) return res.status(400).send('missing url');
 
+    let parsed;
     try {
-        new URL(videoUrl);
-    } catch {
-        return res.status(400).send('Неверный URL');
+        parsed = new URL(videoUrl);
+    } catch (e) {
+        return res.status(400).send('invalid url');
     }
 
-    res.redirect(videoUrl);
+    // ✅ SSRF ЗАЩИТА — запрет локальных адресов
+    const hostname = parsed.hostname;
+    if (/^(localhost|127|0\.0\.0\.0)$/.test(hostname) || 
+        /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(hostname)) {
+        return res.status(403).send('forbidden host');
+    }
+
+    const protocol = parsed.protocol === 'https:' ? https : http;
+
+    const options = {
+        method: 'GET',
+        headers: {}
+    };
+
+    // ✅ ПОДДЕРЖКА RANGE ЗАПРОСОВ
+    if (req.headers.range) {
+        options.headers.Range = req.headers.range;
+    }
+
+    const upstream = protocol.request(videoUrl, options, upstreamRes => {
+        // ✅ ПРОКСИРОВАНИЕ ВАЖНЫХ ЗАГОЛОВКОВ
+        const headersToForward = [
+            'content-type', 
+            'content-length', 
+            'accept-ranges', 
+            'content-range', 
+            'cache-control', 
+            'last-modified'
+        ];
+        
+        headersToForward.forEach(h => {
+            if (upstreamRes.headers[h]) {
+                res.setHeader(h, upstreamRes.headers[h]);
+            }
+        });
+
+        res.statusCode = upstreamRes.statusCode || 200;
+        upstreamRes.pipe(res);
+    });
+
+    upstream.on('error', (err) => {
+        console.error('stream proxy error:', err.message);
+        if (!res.headersSent) {
+            res.status(502).send('bad gateway');
+        }
+    });
+
+    upstream.end();
 });
 
 // ============= RUTUBE API =============
@@ -220,15 +310,15 @@ app.post('/api/rutube', async (req, res) => {
     if (!videoId) return res.status(400).json({ error: 'videoId обязателен' });
 
     try {
-        const https = require('https');
-        
         const options = {
             hostname: 'rutube.ru',
             path: `/api/play/options/${videoId}/`,
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0'
-            }
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://rutube.ru'
+            },
+            timeout: 10000
         };
 
         const request = https.request(options, (response) => {
@@ -241,25 +331,36 @@ app.post('/api/rutube', async (req, res) => {
                         res.json({
                             url: json.video_balancer.m3u8,
                             title: json.title || 'Rutube видео',
-                            type: 'hls'
+                            type: 'hls',
+                            duration: json.duration || null
                         });
                     } else {
-                        res.status(404).json({ error: 'Видео не найдено' });
+                        res.status(404).json({ error: 'video_not_found' });
                     }
                 } catch (e) {
-                    res.status(500).json({ error: 'Ошибка парсинга' });
+                    res.status(500).json({ error: 'invalid_json_response' });
                 }
             });
         });
 
         request.on('error', (error) => {
-            res.status(500).json({ error: error.message });
+            console.error('Rutube API error:', error.message);
+            if (error.message.includes('timeout')) {
+                res.status(408).json({ error: 'request_timeout' });
+            } else {
+                res.status(500).json({ error: 'rutube_api_error' });
+            }
+        });
+
+        request.on('timeout', () => {
+            request.destroy();
         });
 
         request.end();
 
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('Rutube error:', error);
+        res.status(500).json({ error: 'internal_error' });
     }
 });
 
@@ -269,7 +370,7 @@ app.post('/api/vk', (req, res) => {
     if (!oid || !id) return res.status(400).json({ error: 'missing_params' });
 
     res.json({
-        url: `https://vk.com/video_ext.php?oid=${oid}&id=${id}`,
+        url: `https://vk.com/video_ext.php?oid=${oid}&id=${id}&autoplay=1`,
         title: 'VK видео',
         type: 'embed'
     });
@@ -331,7 +432,8 @@ io.on('connection', (socket) => {
             socket.syncInterval = syncInterval;
 
         } catch (error) {
-            console.error('Ошибка:', error);
+            console.error('Ошибка при присоединении:', error);
+            socket.emit('error', { message: 'Ошибка при присоединении к комнате' });
         }
     });
 
@@ -455,6 +557,10 @@ server.listen(PORT, '0.0.0.0', () => {
 ╔══════════════════════════════════════╗
 ║   🎬 CINEMATE SYNC СЕРВЕР ЗАПУЩЕН    ║
 ║   Адрес: http://localhost:${PORT}     ║
+║   ✅ SSRF защита                      ║
+║   ✅ Кеширование ссылок                ║
+║   ✅ Лучший выбор форматов             ║
+║   ✅ Детализация ошибок                ║
 ╚══════════════════════════════════════╝
     `);
 });
@@ -462,4 +568,9 @@ server.listen(PORT, '0.0.0.0', () => {
 // Обработка ошибок
 process.on('uncaughtException', (err) => {
     console.error('Необработанная ошибка:', err);
+});
+
+process.on('SIGTERM', () => {
+    console.log('⏹️ Сервер выключается...');
+    server.close(() => process.exit(0));
 });
