@@ -599,7 +599,12 @@
 
     <script>
         // ==================== SOCKET.IO ИНИЦИАЛИЗАЦИЯ ====================
-        const socket = io();
+        const socket = io('https://cinemate-server-u0w8.onrender.com', {
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: 5
+        });
         
         // ==================== ПЕРЕМЕННЫЕ СОСТОЯНИЯ ====================
         const state = {
