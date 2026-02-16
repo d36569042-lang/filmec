@@ -93,6 +93,7 @@ app.get('/', (req, res) => {
 });
 
 // ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО (с кешированием и лучшим выбором форматов) =============
+// ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО =============
 app.post('/api/extract', async (req, res) => {
     const { url } = req.body;
     
@@ -100,208 +101,195 @@ app.post('/api/extract', async (req, res) => {
         return res.status(400).json({ error: 'URL обязателен' });
     }
 
-    try {
-        console.log(`🔍 Извлечение видео из: ${url}`);
+    console.log(`🔍 Извлечение видео из: ${url}`);
 
-        // ✅ ПРОВЕРКА КЕША (производительность)
-        if (urlCache.has(url)) {
-            const cached = urlCache.get(url);
-            if (Date.now() - cached.timestamp < 3600000) { // 60 минут
-                console.log('✅ Использован кеш');
-                return res.json(cached.data);
-            } else {
-                urlCache.delete(url);
-            }
-        }
-
-        // Прямые ссылки на видеофайлы
-        if (url.match(/\.(mp4|webm|ogg|mov|mkv|avi|m3u8)(\?.*)?$/i)) {
-            const isHls = url.includes('.m3u8');
-            const result = {
-                url: url,
-                title: 'Видео файл',
-                type: isHls ? 'hls' : 'direct'
-            };
-            urlCache.set(url, { data: result, timestamp: Date.now() });
-            return res.json(result);
-        }
-
-        // Пытаемся использовать yt-dlp
-        let youtubedl;
+    // Специальная обработка для Rutube
+    if (url.includes('rutube.ru')) {
         try {
-            youtubedl = require('youtube-dl-exec');
-        } catch (e) {
-            console.log('⚠️ yt-dlp не установлен, используем fallback');
-            const result = {
-                url: url,
-                title: 'Видео',
-                type: 'embed'
-            };
-            urlCache.set(url, { data: result, timestamp: Date.now() });
-            return res.json(result);
-        }
-
-        // Используем yt-dlp с таймаутом
-        const info = await Promise.race([
-            youtubedl(url, {
-                dumpSingleJson: true,
-                noWarnings: true,
-                noCheckCertificate: true,
-                preferFreeFormats: true,
-                skipDownload: true,
-                socketTimeout: 30000
-            }),
-            new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('youtube-dl request timeout')), 45000)
-            )
-        ]);
-
-        if (!info) {
-            return res.status(422).json({ error: 'no_info' });
-        }
-
-        // ✅ ЛУЧШИЙ ВЫБОР ФОРМАТОВ (качество видео)
-        let directUrl = info.url || null;
-        let title = info.title || 'Видео';
-        let type = 'direct';
-        
-        if ((!directUrl || !directUrl.startsWith('http')) && Array.isArray(info.formats)) {
-            // Фильтруем форматы с URL
-            const availableFormats = info.formats.filter(f => f.url && f.url.startsWith('http'));
-            
-            if (availableFormats.length > 0) {
-                // ✅ СОРТИРОВКА: видео с аудио > видео без аудио, затем по размеру
-                const sorted = availableFormats.sort((a, b) => {
-                    const aHasAudio = a.acodec && a.acodec !== 'none';
-                    const bHasAudio = b.acodec && b.acodec !== 'none';
-                    
-                    if (aHasAudio !== bHasAudio) {
-                        return aHasAudio ? -1 : 1;
+            // Пытаемся получить ID видео из URL
+            const videoIdMatch = url.match(/video\/([a-f0-9]+)/);
+            if (videoIdMatch && videoIdMatch[1]) {
+                const videoId = videoIdMatch[1];
+                
+                // Запрашиваем API Rutube
+                const apiUrl = `https://rutube.ru/api/play/options/${videoId}/`;
+                
+                const response = await fetch(apiUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     }
-                    
-                    return (b.filesize || 0) - (a.filesize || 0);
                 });
-
-                // ✅ ПРЕДПОЧТЕНИЕ: mp4/webm
-                const preferred = sorted.find(f => {
-                    const ext = (f.ext || '').toLowerCase();
-                    return ['mp4', 'webm', 'mov', 'mkv'].includes(ext);
-                }) || sorted[0];
-
-                if (preferred && preferred.url) {
-                    directUrl = preferred.url;
-                    if (preferred.url.includes('.m3u8')) type = 'hls';
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.video_balancer && data.video_balancer.m3u8) {
+                        console.log(`✅ Rutube HLS получен: ${data.title}`);
+                        return res.json({
+                            url: data.video_balancer.m3u8,
+                            title: data.title || 'Rutube видео',
+                            type: 'hls'
+                        });
+                    }
                 }
             }
-        }
-
-        if (!directUrl) {
-            console.log(`⚠️ Не найдена прямая ссылка для ${url}`);
-            return res.status(422).json({ error: 'no_direct_url' });
-        }
-
-        const result = { 
-            url: directUrl, 
-            title: title, 
-            type: type,
-            extractor: info.extractor || null,
-            duration: info.duration || null 
-        };
-
-        // ✅ СОХРАНЯЕМ В КЕШ
-        urlCache.set(url, {
-            data: result,
-            timestamp: Date.now()
-        });
-
-        console.log(`✅ Извлечена ссылка для ${title}`);
-        return res.json(result);
-
-    } catch (err) {
-        console.error('❌ extract error:', err.message);
-        
-        // ✅ ДЕТАЛИЗАЦИЯ ОШИБОК
-        if (err.message.includes('not found')) {
-            return res.status(404).json({ error: 'video_not_found' });
-        } else if (err.message.includes('429') || err.message.includes('Too Many Requests')) {
-            return res.status(429).json({ error: 'rate_limited' });
-        } else if (err.message.includes('403') || err.message.includes('Forbidden')) {
-            return res.status(403).json({ error: 'access_forbidden' });
-        } else if (err.message.includes('unavailable') || err.message.includes('not available')) {
-            return res.status(410).json({ error: 'content_unavailable' });
-        } else if (err.message.includes('timeout')) {
-            return res.status(408).json({ error: 'request_timeout' });
+        } catch (e) {
+            console.log('Rutube API error, using fallback');
         }
         
-        // Fallback при ошибке
+        // Fallback: возвращаем оригинальный URL для iframe
         return res.json({
             url: url,
-            title: 'Видео',
+            title: 'Rutube видео',
             type: 'embed'
         });
     }
+
+    // Специальная обработка для VK
+    if (url.includes('vk.com') || url.includes('vkontakte.ru')) {
+        return res.json({
+            url: url,
+            title: 'VK видео',
+            type: 'embed'
+        });
+    }
+
+    // Специальная обработка для YouTube
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        // Пробуем yt-dlp
+        try {
+            const youtubedl = require('youtube-dl-exec');
+            const info = await youtubedl(url, {
+                dumpSingleJson: true,
+                noWarnings: true,
+                preferFreeFormats: true,
+                skipDownload: true
+            });
+            
+            if (info.url) {
+                return res.json({
+                    url: info.url,
+                    title: info.title || 'YouTube видео',
+                    type: 'direct'
+                });
+            }
+        } catch (e) {
+            console.log('yt-dlp failed, using embed fallback');
+        }
+        
+        // Fallback для YouTube
+        return res.json({
+            url: url,
+            title: 'YouTube видео',
+            type: 'embed'
+        });
+    }
+
+    // Прямые ссылки на видео
+    if (url.match(/\.(mp4|webm|ogg|mov|mkv|m3u8)(\?.*)?$/i)) {
+        const isHls = url.includes('.m3u8');
+        return res.json({
+            url: url,
+            title: 'Видео файл',
+            type: isHls ? 'hls' : 'direct'
+        });
+    }
+
+    // Для всего остального - пробуем yt-dlp
+    try {
+        const youtubedl = require('youtube-dl-exec');
+        const info = await youtubedl(url, {
+            dumpSingleJson: true,
+            noWarnings: true,
+            preferFreeFormats: true,
+            skipDownload: true
+        });
+        
+        if (info.url) {
+            return res.json({
+                url: info.url,
+                title: info.title || 'Видео',
+                type: 'direct'
+            });
+        }
+    } catch (e) {
+        console.log('yt-dlp failed for general URL');
+    }
+
+    // Универсальный fallback
+    res.json({
+        url: url,
+        title: 'Видео',
+        type: 'embed'
+    });
 });
 
+
 // ============= STREAM PROXY (с SSRF защитой и поддержкой Range) =============
+// ============= УЛУЧШЕННЫЙ STREAM PROXY =============
 app.get('/stream', (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).send('missing url');
 
-    let parsed;
+    console.log(`🔄 Прокси запрос для: ${videoUrl.substring(0, 100)}`);
+
     try {
-        parsed = new URL(videoUrl);
-    } catch (e) {
-        return res.status(400).send('invalid url');
-    }
-
-    // ✅ SSRF ЗАЩИТА — запрет локальных адресов
-    const hostname = parsed.hostname;
-    if (/^(localhost|127|0\.0\.0\.0)$/.test(hostname) || 
-        /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(hostname)) {
-        return res.status(403).send('forbidden host');
-    }
-
-    const protocol = parsed.protocol === 'https:' ? https : http;
-
-    const options = {
-        method: 'GET',
-        headers: {}
-    };
-
-    // ✅ ПОДДЕРЖКА RANGE ЗАПРОСОВ
-    if (req.headers.range) {
-        options.headers.Range = req.headers.range;
-    }
-
-    const upstream = protocol.request(videoUrl, options, upstreamRes => {
-        // ✅ ПРОКСИРОВАНИЕ ВАЖНЫХ ЗАГОЛОВКОВ
-        const headersToForward = [
-            'content-type', 
-            'content-length', 
-            'accept-ranges', 
-            'content-range', 
-            'cache-control', 
-            'last-modified'
-        ];
+        const parsedUrl = new URL(videoUrl);
         
-        headersToForward.forEach(h => {
-            if (upstreamRes.headers[h]) {
-                res.setHeader(h, upstreamRes.headers[h]);
+        // Защита от SSRF
+        const hostname = parsedUrl.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
+            return res.status(403).send('forbidden');
+        }
+
+        const protocol = parsedUrl.protocol === 'https:' ? https : http;
+        
+        const options = {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': parsedUrl.origin
+            }
+        };
+
+        // Поддержка Range запросов (для перемотки)
+        if (req.headers.range) {
+            options.headers.Range = req.headers.range;
+        }
+
+        const proxyReq = protocol.request(videoUrl, options, (proxyRes) => {
+            // Копируем важные заголовки
+            const headersToCopy = [
+                'content-type', 'content-length', 'content-range',
+                'accept-ranges', 'cache-control', 'last-modified'
+            ];
+            
+            headersToCopy.forEach(header => {
+                if (proxyRes.headers[header]) {
+                    res.setHeader(header, proxyRes.headers[header]);
+                }
+            });
+
+            // Добавляем CORS заголовки
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+            
+            res.statusCode = proxyRes.statusCode || 200;
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on('error', (error) => {
+            console.error('❌ Proxy error:', error.message);
+            if (!res.headersSent) {
+                res.status(502).send('Proxy error');
             }
         });
 
-        res.statusCode = upstreamRes.statusCode || 200;
-        upstreamRes.pipe(res);
-    });
+        proxyReq.end();
 
-    upstream.on('error', (err) => {
-        console.error('stream proxy error:', err.message);
-        if (!res.headersSent) {
-            res.status(502).send('bad gateway');
-        }
-    });
-
-    upstream.end();
+    } catch (error) {
+        console.error('❌ Stream error:', error);
+        res.status(500).send('Internal error');
+    }
 });
 
 // ============= RUTUBE API =============
