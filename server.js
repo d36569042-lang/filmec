@@ -170,11 +170,16 @@ app.post('/api/extract', async (req, res) => {
                     if (response.ok) {
                         const data = await response.json();
                         if (data.video_balancer && data.video_balancer.m3u8) {
+                            const hlsUrl = data.video_balancer.m3u8;
                             console.log(`✅ Rutube HLS получен: ${data.title}`);
+                            
+                            // ВАЖНО: Возвращаем URL через /stream proxy чтобы избежать CORS ошибок
+                            // Frontend будет запрашивать /stream?url=... вместо прямого Rutube URL
                             return res.json({
-                                url: data.video_balancer.m3u8,
+                                url: `/stream?url=${encodeURIComponent(hlsUrl)}`,
                                 title: data.title || 'Rutube видео',
-                                type: 'hls'
+                                type: 'hls',
+                                isProxy: true
                             });
                         }
                     }
@@ -274,7 +279,8 @@ app.get('/stream', (req, res) => {
             // Копируем важные заголовки
             const headersToCopy = [
                 'content-type', 'content-length', 'content-range',
-                'accept-ranges', 'cache-control', 'last-modified'
+                'accept-ranges', 'cache-control', 'last-modified',
+                'etag'
             ];
             
             headersToCopy.forEach(header => {
@@ -283,9 +289,17 @@ app.get('/stream', (req, res) => {
                 }
             });
 
-            // Добавляем CORS заголовки
+            // Добавляем CORS заголовки (очень важно для HLS.js)
             res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Type');
+            res.setHeader('Access-Control-Max-Age', '3600');
+            
+            // Если это m3u8, убедимся что content-type правильный
+            if (videoUrl.includes('.m3u8')) {
+                res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+            }
             
             res.statusCode = proxyRes.statusCode || 200;
             proxyRes.pipe(res);

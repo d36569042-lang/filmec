@@ -1272,16 +1272,26 @@ socket.io.on("reconnect_failed", () => {
                     
                     if (resp.ok) {
                         const json = await resp.json();
-                        const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                        
+                        // Преобразуем relative proxy URL в absolute (если нужно)
+                        let finalUrl = json.url;
+                        if (!finalUrl.startsWith('http') && finalUrl.startsWith('/')) {
+                            // Это proxy URL вроде /stream?url=... 
+                            // Нужно добавить BACKEND_URL
+                            finalUrl = BACKEND_URL + finalUrl;
+                            console.log(`📡 Преобразовано в absolute proxy URL: ${finalUrl.substring(0, 80)}...`);
+                        }
+                        
+                        const isHls = finalUrl.includes('.m3u8') || finalUrl.includes('hls') || json.type === 'hls';
                         const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                         videoData = {
                             type: type,
-                            url: json.url,
+                            url: finalUrl,
                             title: json.title || title || 'Rutube видео',
                             originalUrl: url,
-                            useProxy: false
+                            useProxy: json.isProxy || false
                         };
-                        addSystemMessage(`✅ Rutube ссылка извлечена`);
+                        addSystemMessage(`✅ Rutube ссылка извлечена (${json.isProxy ? 'через прокси' : 'прямая'})`);
                     } else {
                         throw new Error('rutube_extract_failed');
                     }
@@ -1303,14 +1313,22 @@ socket.io.on("reconnect_failed", () => {
                     
                     if (resp.ok) {
                         const json = await resp.json();
-                        const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                        
+                        // Преобразуем relative proxy URL в absolute (если нужно)
+                        let finalUrl = json.url;
+                        if (!finalUrl.startsWith('http') && finalUrl.startsWith('/')) {
+                            finalUrl = BACKEND_URL + finalUrl;
+                            console.log(`📡 Преобразовано в absolute proxy URL: ${finalUrl.substring(0, 80)}...`);
+                        }
+                        
+                        const isHls = finalUrl.includes('.m3u8') || finalUrl.includes('hls') || json.type === 'hls';
                         const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                         videoData = {
                             type: type,
-                            url: json.url,
+                            url: finalUrl,
                             title: json.title || title || 'Видео',
                             originalUrl: url,
-                            useProxy: false
+                            useProxy: json.isProxy || false
                         };
                         addSystemMessage(`✅ Ссылка извлечена`);
                     } else {
@@ -1622,15 +1640,23 @@ socket.io.on("reconnect_failed", () => {
                         });
                         if (resp.ok) {
                             const json = await resp.json();
-                            const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                            
+                            // Преобразуем relative proxy URL в absolute (если нужно)
+                            let finalUrl = json.url;
+                            if (!finalUrl.startsWith('http') && finalUrl.startsWith('/')) {
+                                finalUrl = BACKEND_URL + finalUrl;
+                                console.log(`📡 Преобразовано в absolute proxy URL: ${finalUrl.substring(0, 80)}...`);
+                            }
+                            
+                            const isHls = finalUrl.includes('.m3u8') || finalUrl.includes('hls') || json.type === 'hls';
                             // ИСПРАВЛЕНИЕ: Используем тип от сервера если доступен
                             const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                             videoData = {
                                 type: type,
-                                url: json.url,
+                                url: finalUrl,
                                 title: json.title || 'Видео',
                                 originalUrl: url,
-                                useProxy: false
+                                useProxy: json.isProxy || false
                             };
                             addSystemMessage('✅ Ссылка извлечена');
                             useDirectLink = true;
@@ -1707,20 +1733,75 @@ socket.io.on("reconnect_failed", () => {
             
             // НОВОЕ: Обработка ВК видео и других типов
             if (videoData.type === 'vk-direct' || videoData.type === 'vk-embed') {
-                // ВК видео загружаем через iframe embed
-                console.log('📺 Загружаю ВК видео через iframe');
-                elements.videoPlayer.style.display = 'block';
+                // ВК видео: iframe встраивание блокируется X-Frame-Options
+                // Поэтому показываем кнопку открытия в новом окне
+                console.log('📺 ВК видео обнаружено - используем фоллбэк (кнопка открытия)');
+                
+                // Скрываем видео плеер
+                elements.videoPlayer.style.display = 'none';
                 elements.nativeVideo.style.display = 'none';
                 
-                // Используем embedUrl если есть, иначе оригинальный URL
-                const embedUrl = videoData.embedUrl || videoData.url;
-                elements.videoPlayer.src = embedUrl;
+                // Создаем фоллбэк элемент если его еще нет
+                let fallbackDiv = document.getElementById('vkFallback');
+                if (!fallbackDiv) {
+                    fallbackDiv = document.createElement('div');
+                    fallbackDiv.id = 'vkFallback';
+                    fallbackDiv.style.cssText = `
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        width: 100%;
+                        height: 100%;
+                        background: linear-gradient(135deg, #4a90e2 0%, #357abd 100%);
+                        border-radius: 8px;
+                        color: white;
+                        padding: 40px;
+                        text-align: center;
+                        box-sizing: border-box;
+                        min-height: 480px;
+                    `;
+                    document.getElementById('playerWrapper').appendChild(fallbackDiv);
+                }
                 
-                addSystemMessage(`📺 ВК видео загружено (мягкая синхронизация ±30сек)`);
-                addSystemMessage(`⚠️ Примечание: синхронизация может быть не идеальной `);
+                // Наполняем фоллбэк
+                fallbackDiv.innerHTML = `
+                    <div style="font-size: 48px; margin-bottom: 20px;">🎬</div>
+                    <h2 style="margin: 0 0 10px 0;">ВК Видео</h2>
+                    <p style="margin: 0 0 20px 0; opacity: 0.9; max-width: 400px;">${videoData.title || 'Видео загружено'}</p>
+                    <p style="margin: 0 0 30px 0; opacity: 0.8; font-size: 14px;">
+                        ⚠️ VK блокирует встраивание видео в iframe.<br/>
+                        Откройте видео в новом окне для просмотра.
+                    </p>
+                    <button id="openVkBtn" style="
+                        padding: 12px 32px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        background: white;
+                        color: #4a90e2;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        transition: all 0.3s;
+                    ">
+                        🔗 Открыть видео в новом окне
+                    </button>
+                    <p id="syncStatus" style="margin-top: 30px; opacity: 0.7; font-size: 12px;">
+                        💓 Синхронизация heartbeat включена
+                    </p>
+                `;
+                fallbackDiv.style.display = 'flex';
                 
-                // Для ВК видео - используем временную синхронизацию
-                // Не можем контролировать iframe, но можем синхронизировать состояние
+                // Добавляем обработчик кнопки
+                document.getElementById('openVkBtn').addEventListener('click', () => {
+                    window.open(videoData.url, 'vk_video', 'width=960,height=720');
+                });
+                
+                addSystemMessage(`📺 ВК видео: ${videoData.title}`);
+                addSystemMessage(`💡 Откройте видео в новом окне или кликните сверху на кнопку`);
+                addSystemMessage(`💓 Синхронизация через heartbeat (допустимое расхождение ±30сек)`);
+                
+                // Для ВК видео - используем heartbeat синхронизацию
                 setupLooseSyncForEmbed();
                 
                 return;
