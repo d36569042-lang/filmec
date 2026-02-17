@@ -756,8 +756,8 @@
                     <h3 id="currentVideoTitle">Вставьте ссылку на видео</h3>
                 </div>
                 <div class="player-wrapper" id="playerWrapper">
-                    <iframe id="videoPlayer" frameborder="0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen="true"></iframe>
-                    <video id="nativeVideo" class="native-video" controls></video>
+                    <iframe id="videoPlayer" frameborder="0" allow="autoplay; encrypted-media; fullscreen; accelerometer; gyroscope; picture-in-picture" allowfullscreen sandbox="allow-same-origin allow-scripts allow-presentation allow-popups"></iframe>
+                    <video id="nativeVideo" class="native-video" controls crossorigin="use-credentials"></video>
                 </div>
                 
                 <div class="player-controls-overlay">
@@ -1203,8 +1203,10 @@ socket.io.on("reconnect_failed", () => {
                     if (resp.ok) {
                         const json = await resp.json();
                         const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                        // ИСПРАВЛЕНИЕ: Используем тип от сервера если доступен
+                        const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                         videoData = {
-                            type: isHls ? 'hls' : 'direct',
+                            type: type,
                             url: json.url,
                             title: json.title || title || 'Видео',
                             originalUrl: url,
@@ -1220,9 +1222,9 @@ socket.io.on("reconnect_failed", () => {
                     addSystemMessage('⚠️ Не удалось извлечь ссылку, пробую прокси...');
                     // Последний шанс - через прокси
                     videoData = {
-                        type: 'direct',
-                        url: `${BACKEND_URL}/stream?url=${encodeURIComponent(url)}`,
-                        title: title || 'Видео (через прокси)',
+                        type: 'embed',
+                        url: url,
+                        title: title || 'Видео',
                         originalUrl: url,
                         useProxy: true
                     };
@@ -1462,8 +1464,10 @@ socket.io.on("reconnect_failed", () => {
                         if (resp.ok) {
                             const json = await resp.json();
                             const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                            // ИСПРАВЛЕНИЕ: Используем тип от сервера если доступен
+                            const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                             videoData = {
-                                type: isHls ? 'hls' : 'direct',
+                                type: type,
                                 url: json.url,
                                 title: json.title || 'Видео',
                                 originalUrl: url,
@@ -1478,7 +1482,7 @@ socket.io.on("reconnect_failed", () => {
                         console.error('Extraction failed', e);
                         addSystemMessage('⚠️ Извлечение не сработало, буду использовать прокси при ошибке');
                         videoData = {
-                            type: 'direct',
+                            type: 'embed',
                             url: url,
                             title: 'Видео',
                             originalUrl: url,
@@ -1524,6 +1528,9 @@ socket.io.on("reconnect_failed", () => {
             // Очищаем предыдущее видео
             elements.nativeVideo.style.display = 'none';
             elements.videoPlayer.style.display = 'none';
+            
+            // Очищаем iframe
+            elements.videoPlayer.src = '';
             
             // Закрываем прежние слушатели и HLS экземпляр
             if (window.currentHls) {
@@ -1632,9 +1639,42 @@ socket.io.on("reconnect_failed", () => {
                 
                 setupVideoListeners();
             } else if (videoData.type === 'rutube' || videoData.type === 'vk' || videoData.type === 'embed') {
-                // ИСПРАВЛЕНИЕ: Убрали iframe поддержку - используем только API
-                addSystemMessage('⚠️ Требуется прямая ссылка от сервера');
-                return;
+                // ИСПРАВЛЕНИЕ: Добавили iframe поддержку для VK и YouTube
+                console.log('📺 Загружаю видео через iframe:', videoData.url);
+                
+                // Для VK видео работает iframe встраивание
+                if (videoData.url.includes('vk.com') || videoData.url.includes('vkontakte.ru')) {
+                    elements.videoPlayer.style.display = 'block';
+                    elements.nativeVideo.style.display = 'none';
+                    elements.videoPlayer.src = videoData.url;
+                    addSystemMessage('📺 Загружено VK видео');
+                    return;
+                }
+                
+                // Для RuTube и YouTube - пробуем через прокси
+                if (videoData.url.includes('rutube.ru') || videoData.url.includes('youtube.com') || videoData.url.includes('youtu.be')) {
+                    // Пытаемся загрузить через прокси
+                    console.log('📺 RuTube/YouTube - загружаю через прокси');
+                    elements.nativeVideo.style.display = 'block';
+                    const proxyUrl = `${BACKEND_URL}/stream?url=${encodeURIComponent(videoData.originalUrl || videoData.url)}`;
+                    elements.nativeVideo.src = proxyUrl;
+                    elements.nativeVideo.dataset.originalUrl = videoData.originalUrl || videoData.url;
+                    
+                    try {
+                        elements.nativeVideo.load();
+                        addSystemMessage('📺 Загружаю видео через прокси сервер...');
+                        setupVideoListeners();
+                        return;
+                    } catch (e) {
+                        console.error('Ошибка загрузки через прокси:', e);
+                    }
+                }
+                
+                // Последний вариант - iframe для остального
+                elements.videoPlayer.style.display = 'block';
+                elements.nativeVideo.style.display = 'none';
+                elements.videoPlayer.src = videoData.url;
+                addSystemMessage('⚠️ Загружено через встроенный плеер');
             }
         }
 
