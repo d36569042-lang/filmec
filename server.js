@@ -158,7 +158,7 @@ app.post('/api/extract', async (req, res) => {
                 if (videoIdMatch && videoIdMatch[1]) {
                     const videoId = videoIdMatch[1];
                     
-                    // Запрашиваем API Rutube
+                    // Запрашиваем API Rutube для получения информации о видео
                     const apiUrl = `https://rutube.ru/api/play/options/${videoId}/`;
                     
                     const response = await fetch(apiUrl, {
@@ -169,39 +169,70 @@ app.post('/api/extract', async (req, res) => {
                     
                     if (response.ok) {
                         const data = await response.json();
-                        if (data.video_balancer && data.video_balancer.m3u8) {
-                            const hlsUrl = data.video_balancer.m3u8;
-                            console.log(`✅ Rutube HLS получен: ${data.title}`);
-                            
-                            // ВАЖНО: Возвращаем URL через /stream proxy чтобы избежать CORS ошибок
-                            // Frontend будет запрашивать /stream?url=... вместо прямого Rutube URL
-                            return res.json({
-                                url: `/stream?url=${encodeURIComponent(hlsUrl)}`,
-                                title: data.title || 'Rutube видео',
-                                type: 'hls',
-                                isProxy: true
-                            });
-                        }
+                        console.log(`✅ Rutube видео получено: ${data.title}`);
+                        
+                        // Возвращаем информацию для встраивания плеера Rutube
+                        return res.json({
+                            url: url,
+                            embedUrl: url,  // Rutube может встраиваться через iframe
+                            videoId: videoId,
+                            title: data.title || 'Rutube видео',
+                            type: 'rutube-embed',
+                            playerUrl: `https://rutube.ru/play/embed/${videoId}`  // URL для iframe
+                        });
                     }
                 }
             } catch (e) {
                 console.log('Rutube API error:', e.message);
             }
             
-            // Fallback: возвращаем оригинальный URL для iframe
+            // Fallback: возвращаем оригинальный URL
+            const videoIdMatch = url.match(/video\/([a-f0-9]+)/);
+            const videoId = videoIdMatch ? videoIdMatch[1] : null;
             return res.json({
                 url: url,
+                embedUrl: url,
+                videoId: videoId,
                 title: 'Rutube видео',
-                type: 'embed'
+                type: 'rutube-embed',
+                playerUrl: videoId ? `https://rutube.ru/play/embed/${videoId}` : url
             });
         }
 
         // Специальная обработка для VK
         if (url.includes('vk.com') || url.includes('vkvideo.ru')) {
+            try {
+                // Попытка извлечь ID видео из URL
+                // Форматы: vk.com/video<id>, vkvideo.ru/<id>
+                let videoId = null;
+                const match1 = url.match(/vk\.com\/video(-?\d+_\d+)/);
+                const match2 = url.match(/vkvideo\.ru\/(\d+)/);
+                const match3 = url.match(/oid=(-?\d+)&id=(\d+)/);
+                
+                if (match1) {
+                    videoId = match1[1];
+                } else if (match2) {
+                    videoId = match2[1];
+                } else if (match3) {
+                    videoId = `${match3[1]}_${match3[2]}`;
+                }
+                
+                console.log(`✅ VK видео получено, ID: ${videoId}`);
+                
+                return res.json({
+                    url: url,
+                    videoId: videoId,
+                    title: 'VK видео',
+                    type: 'vk-embed'
+                });
+            } catch (e) {
+                console.log('VK処理 error:', e.message);
+            }
+            
             return res.json({
                 url: url,
                 title: 'VK видео',
-                type: 'embed'
+                type: 'vk-embed'
             });
         }
 
@@ -577,6 +608,27 @@ io.on('connection', (socket) => {
         socket.emit('video-command-ack', {
             commandId: room.videoState.commandId,
             serverTimestamp: Date.now()
+        });
+    });
+
+    // НОВОЕ: Обработка синхронизации для embed видео (Rutube, VK)
+    socket.on('embed-sync-status', (data) => {
+        if (!currentRoomId || !rooms.has(currentRoomId)) return;
+
+        const room = rooms.get(currentRoomId);
+        
+        if (room.leaderId !== socket.id) {
+            return; // Только ведущий может отправлять статус
+        }
+
+        // Пересылаем статус все остальным участникам
+        io.to(currentRoomId).except(socket.id).emit('embed-sync-status', {
+            roomId: currentRoomId,
+            videoType: data.videoType,
+            isPlaying: data.isPlaying,
+            currentTime: data.currentTime,
+            leaderId: socket.id,
+            timestamp: Date.now()
         });
     });
 
