@@ -756,7 +756,7 @@
                     <h3 id="currentVideoTitle">Вставьте ссылку на видео</h3>
                 </div>
                 <div class="player-wrapper" id="playerWrapper">
-                    <iframe id="videoPlayer" frameborder="0" allow="autoplay; encrypted-media; fullscreen; accelerometer; gyroscope; picture-in-picture" allowfullscreen sandbox="allow-same-origin allow-scripts allow-presentation allow-popups"></iframe>
+                    <iframe id="videoPlayer" frameborder="0" allow="autoplay; encrypted-media; fullscreen; accelerometer; gyroscope; picture-in-picture; display-capture" allowfullscreen></iframe>
                     <video id="nativeVideo" class="native-video" controls crossorigin="use-credentials"></video>
                 </div>
                 
@@ -1046,9 +1046,9 @@ socket.io.on("reconnect_failed", () => {
         elements.loadUrlBtn.disabled = false;
         elements.urlInput.disabled = false;
     } else {
-        addSystemMessage('👥 Вы ЗРИТЕЛЬ. Следуете за ведущим');
+        addSystemMessage('👥 Вы ЗРИТЕЛЬ. Следуете за ведущим (ведущий загружает видео)');
         elements.loadUrlBtn.disabled = true;
-        elements.urlInput.disabled = true;
+        elements.urlInput.disabled = false;  // ИСПРАВЛЕНИЕ: Разрешаем вводить рекомендации
     }
     
     // ИСПРАВЛЕНИЕ: Загружаем видео если оно есть в комнате
@@ -1153,7 +1153,7 @@ socket.io.on("reconnect_failed", () => {
     } else if (state.isLeader) {
         state.isLeader = false;
         elements.loadUrlBtn.disabled = true;
-        elements.urlInput.disabled = true;
+        elements.urlInput.disabled = false;  // ИСПРАВЛЕНИЕ: Зритель может предложить ссылку
         addSystemMessage('📺 Вы больше не ведущий');
     }
 });
@@ -1530,7 +1530,7 @@ socket.io.on("reconnect_failed", () => {
             elements.chatInput.disabled = true;
             elements.sendMessageBtn.disabled = true;
             elements.loadUrlBtn.disabled = true;
-            elements.urlInput.disabled = true;
+            elements.urlInput.disabled = false;  // ИСПРАВЛЕНИЕ: Input остается включен для копипаста
             
             elements.nativeVideo.pause();
             elements.nativeVideo.src = '';
@@ -1590,8 +1590,20 @@ socket.io.on("reconnect_failed", () => {
         }
 
         function loadVideo(url) {
+            if (!url || url.trim().length === 0) {
+                alert('Пожалуйста, введите ссылку на видео');
+                return;
+            }
+            
             if (!state.isLeader) {
-                alert('Только ведущий может загружать видео!');
+                // НОВОЕ: Зритель может отправить рекомендацию ведущему
+                const recommendation = prompt('Вы зритель. Напишите сообщение ведущему (опционально):', url);
+                if (recommendation !== null) {
+                    socket.emit('send-chat-message', {
+                        message: `📹 Рекомендует видео: ${url} ${recommendation && recommendation !== url ? '- ' + recommendation : ''}`
+                    });
+                    addSystemMessage('📤 Рекомендация отправлена ведущему');
+                }
                 return;
             }
             
