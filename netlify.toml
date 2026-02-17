@@ -1,9 +1,9 @@
 [build]
   publish = "."
-  command = "echo 'Static site, no build needed'"
+  command = "echo 'Static site - no build needed. Backend deployed on Render'"
 
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
 
 # ===== ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ =====
 # Установите эту переменную в Netlify Dashboard:

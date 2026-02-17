@@ -4,8 +4,7 @@
   "description": "Синхронизированный просмотр фильмов в реальном времени",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "npm install -g youtube-dl-exec"
+    "start": "node server.js"
   },
   "keywords": [
     "sync",
@@ -18,10 +17,9 @@
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "socket.io": "^4.5.4",
-    "socket.io-client": "^4.8.3",
-    "youtube-dl-exec": "^3.1.1"
+    "socket.io-client": "^4.8.3"
   },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }

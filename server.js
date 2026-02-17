@@ -200,28 +200,7 @@ app.post('/api/extract', async (req, res) => {
 
         // Специальная обработка для YouTube
         if (url.includes('youtube.com') || url.includes('youtu.be')) {
-            // Пробуем yt-dlp
-            try {
-                const youtubedl = require('youtube-dl-exec');
-                const info = await youtubedl(url, {
-                    dumpSingleJson: true,
-                    noWarnings: true,
-                    preferFreeFormats: true,
-                    skipDownload: true
-                });
-                
-                if (info.url) {
-                    return res.json({
-                        url: info.url,
-                        title: info.title || 'YouTube видео',
-                        type: 'direct'
-                    });
-                }
-            } catch (e) {
-                console.log('yt-dlp failed:', e.message);
-            }
-            
-            // Fallback для YouTube
+            // YouTube embed (работает везде без дополнительных зависимостей)
             return res.json({
                 url: url,
                 title: 'YouTube видео',
@@ -239,29 +218,8 @@ app.post('/api/extract', async (req, res) => {
             });
         }
 
-        // Для всего остального - пробуем yt-dlp
-        try {
-            const youtubedl = require('youtube-dl-exec');
-            const info = await youtubedl(url, {
-                dumpSingleJson: true,
-                noWarnings: true,
-                preferFreeFormats: true,
-                skipDownload: true
-            });
-            
-            if (info.url) {
-                return res.json({
-                    url: info.url,
-                    title: info.title || 'Видео',
-                    type: 'direct'
-                });
-            }
-        } catch (e) {
-            console.log('yt-dlp failed for general URL:', e.message);
-        }
-
-        // Универсальный fallback
-        res.json({
+        // Для всего остального - используем embed
+        return res.json({
             url: url,
             title: 'Видео',
             type: 'embed'
