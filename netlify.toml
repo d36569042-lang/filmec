@@ -5,6 +5,12 @@
 [build.environment]
   NODE_VERSION = "18"
 
+# ===== ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ =====
+# Установите эту переменную в Netlify Dashboard:
+# Site settings → Build & deploy → Environment → Environment variables
+# Key: REACT_APP_BACKEND_URL
+# Value: https://ваш-проект.onrender.com (или локальный адрес для тестирования)
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -18,3 +24,19 @@
     Access-Control-Allow-Methods = "GET, POST, PUT, DELETE"
     Access-Control-Allow-Headers = "Content-Type"
     Content-Security-Policy = "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *; style-src * 'unsafe-inline';"
+
+# ===== СПЕЦИАЛЬНО ДЛЯ БЭКЕНДА =====
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, PUT, DELETE, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+
+[[headers]]
+  for = "/stream"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Range"
+    Accept-Ranges = "bytes"

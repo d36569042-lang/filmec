@@ -8,9 +8,35 @@ const { URL } = require('url');
 
 const app = express();
 const server = http.createServer(app);
+
+// ===== ПОЛНАЯ ПОДДЕРЖКА CORS =====
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001', 
+    'http://localhost:8080',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    // Netlify домены
+    'https://netlify.app',
+    'https://filmsite.netlify.app',
+    'https://your-site.netlify.app',
+    '*.netlify.app',
+    // Render домены
+    'https://onrender.com',
+    '*.onrender.com'
+];
+
 const io = socketIo(server, {
     cors: { 
-        origin: "*", 
+        origin: function(origin, callback) {
+            // Позволяем все запросы включая без Origin заголовка
+            if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1') || 
+                origin.includes('netlify.app') || origin.includes('onrender.com')) {
+                callback(null, true);
+            } else {
+                callback(null, true); // Разрешаем все для простоты, можно ограничить позже
+            }
+        },
         methods: ["GET", "POST", "OPTIONS"],
         allowedHeaders: ["Content-Type", "Range"],
         credentials: true
@@ -20,10 +46,28 @@ const io = socketIo(server, {
 
 // Middleware
 app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Range']
+    origin: function(req, callback) {
+        // Разрешаем все источники для разработки
+        callback(null, true);
+    },
+    methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
+    credentials: true
 }));
+
+// Специально для streaming
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(200);
+    } else {
+        next();
+    }
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '.')));
@@ -95,67 +139,107 @@ app.get('/', (req, res) => {
 // ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО (с кешированием и лучшим выбором форматов) =============
 // ============= API: ИЗВЛЕЧЕНИЕ ВИДЕО =============
 app.post('/api/extract', async (req, res) => {
-    const { url } = req.body;
-    
-    if (!url) {
-        return res.status(400).json({ error: 'URL обязателен' });
-    }
+    try {
+        const { url } = req.body;
+        
+        if (!url) {
+            return res.status(400).json({ error: 'URL обязателен' });
+        }
 
-    console.log(`🔍 Извлечение видео из: ${url}`);
+        console.log(`🔍 Извлечение видео из: ${url}`);
 
-    // Специальная обработка для Rutube
-    if (url.includes('rutube.ru')) {
-        try {
-            // Пытаемся получить ID видео из URL
-            const videoIdMatch = url.match(/video\/([a-f0-9]+)/);
-            if (videoIdMatch && videoIdMatch[1]) {
-                const videoId = videoIdMatch[1];
-                
-                // Запрашиваем API Rutube
-                const apiUrl = `https://rutube.ru/api/play/options/${videoId}/`;
-                
-                const response = await fetch(apiUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.video_balancer && data.video_balancer.m3u8) {
-                        console.log(`✅ Rutube HLS получен: ${data.title}`);
-                        return res.json({
-                            url: data.video_balancer.m3u8,
-                            title: data.title || 'Rutube видео',
-                            type: 'hls'
-                        });
+        // Специальная обработка для Rutube
+        if (url.includes('rutube.ru')) {
+            try {
+                // Пытаемся получить ID видео из URL
+                const videoIdMatch = url.match(/video\/([a-f0-9]+)/);
+                if (videoIdMatch && videoIdMatch[1]) {
+                    const videoId = videoIdMatch[1];
+                    
+                    // Запрашиваем API Rutube
+                    const apiUrl = `https://rutube.ru/api/play/options/${videoId}/`;
+                    
+                    const response = await fetch(apiUrl, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.video_balancer && data.video_balancer.m3u8) {
+                            console.log(`✅ Rutube HLS получен: ${data.title}`);
+                            return res.json({
+                                url: data.video_balancer.m3u8,
+                                title: data.title || 'Rutube видео',
+                                type: 'hls'
+                            });
+                        }
                     }
                 }
+            } catch (e) {
+                console.log('Rutube API error:', e.message);
             }
-        } catch (e) {
-            console.log('Rutube API error, using fallback');
+            
+            // Fallback: возвращаем оригинальный URL для iframe
+            return res.json({
+                url: url,
+                title: 'Rutube видео',
+                type: 'embed'
+            });
         }
-        
-        // Fallback: возвращаем оригинальный URL для iframe
-        return res.json({
-            url: url,
-            title: 'Rutube видео',
-            type: 'embed'
-        });
-    }
 
-    // Специальная обработка для VK
-    if (url.includes('vk.com') || url.includes('vkontakte.ru')) {
-        return res.json({
-            url: url,
-            title: 'VK видео',
-            type: 'embed'
-        });
-    }
+        // Специальная обработка для VK
+        if (url.includes('vk.com') || url.includes('vkontakte.ru')) {
+            return res.json({
+                url: url,
+                title: 'VK видео',
+                type: 'embed'
+            });
+        }
 
-    // Специальная обработка для YouTube
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        // Пробуем yt-dlp
+        // Специальная обработка для YouTube
+        if (url.includes('youtube.com') || url.includes('youtu.be')) {
+            // Пробуем yt-dlp
+            try {
+                const youtubedl = require('youtube-dl-exec');
+                const info = await youtubedl(url, {
+                    dumpSingleJson: true,
+                    noWarnings: true,
+                    preferFreeFormats: true,
+                    skipDownload: true
+                });
+                
+                if (info.url) {
+                    return res.json({
+                        url: info.url,
+                        title: info.title || 'YouTube видео',
+                        type: 'direct'
+                    });
+                }
+            } catch (e) {
+                console.log('yt-dlp failed:', e.message);
+            }
+            
+            // Fallback для YouTube
+            return res.json({
+                url: url,
+                title: 'YouTube видео',
+                type: 'embed'
+            });
+        }
+
+        // Прямые ссылки на видео
+        if (url.match(/\.(mp4|webm|ogg|mov|mkv|m3u8)(\?.*)?$/i)) {
+            const isHls = url.includes('.m3u8');
+            return res.json({
+                url: url,
+                title: 'Видео файл',
+                type: isHls ? 'hls' : 'direct'
+            });
+        }
+
+        // Для всего остального - пробуем yt-dlp
         try {
             const youtubedl = require('youtube-dl-exec');
             const info = await youtubedl(url, {
@@ -168,59 +252,30 @@ app.post('/api/extract', async (req, res) => {
             if (info.url) {
                 return res.json({
                     url: info.url,
-                    title: info.title || 'YouTube видео',
+                    title: info.title || 'Видео',
                     type: 'direct'
                 });
             }
         } catch (e) {
-            console.log('yt-dlp failed, using embed fallback');
+            console.log('yt-dlp failed for general URL:', e.message);
         }
-        
-        // Fallback для YouTube
-        return res.json({
+
+        // Универсальный fallback
+        res.json({
             url: url,
-            title: 'YouTube видео',
+            title: 'Видео',
             type: 'embed'
         });
-    }
 
-    // Прямые ссылки на видео
-    if (url.match(/\.(mp4|webm|ogg|mov|mkv|m3u8)(\?.*)?$/i)) {
-        const isHls = url.includes('.m3u8');
-        return res.json({
-            url: url,
-            title: 'Видео файл',
-            type: isHls ? 'hls' : 'direct'
-        });
-    }
-
-    // Для всего остального - пробуем yt-dlp
-    try {
-        const youtubedl = require('youtube-dl-exec');
-        const info = await youtubedl(url, {
-            dumpSingleJson: true,
-            noWarnings: true,
-            preferFreeFormats: true,
-            skipDownload: true
-        });
-        
-        if (info.url) {
-            return res.json({
-                url: info.url,
-                title: info.title || 'Видео',
-                type: 'direct'
+    } catch (error) {
+        console.error('❌ Extract API error:', error.message);
+        if (!res.headersSent) {
+            res.status(500).json({ 
+                error: 'extraction_failed',
+                message: error.message 
             });
         }
-    } catch (e) {
-        console.log('yt-dlp failed for general URL');
     }
-
-    // Универсальный fallback
-    res.json({
-        url: url,
-        title: 'Видео',
-        type: 'embed'
-    });
 });
 
 

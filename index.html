@@ -684,7 +684,6 @@
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <script src="/socket.io/socket.io.js"></script>
     <!-- HLS.js для поддержки M3U8 потоков (Rutube, YouTube TV и т.д.) -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 </head>
@@ -757,7 +756,7 @@
                     <h3 id="currentVideoTitle">Вставьте ссылку на видео</h3>
                 </div>
                 <div class="player-wrapper" id="playerWrapper">
-                    <iframe id="videoPlayer" frameborder="0" allowfullscreen allow="autoplay; encrypted-media; fullscreen"></iframe>
+                    <iframe id="videoPlayer" frameborder="0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen="true"></iframe>
                     <video id="nativeVideo" class="native-video" controls></video>
                 </div>
                 
@@ -790,8 +789,91 @@
 
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <script>
+        // ==================== КОНФИГУРАЦИЯ БЭКЕНДА ====================
+        // Для локального тестирования используйте http://localhost:3000
+        // Для Render используйте https://вашпроект.onrender.com
+        // Переменная окружения Netlify: REACT_APP_BACKEND_URL
+        
+        let BACKEND_URL = null;
+        
+        // ===== КОНФИГУРАЦИЯ ВАШИХ АДРЕСОВ =====
+        // Render бэкенд: https://cinemate-server-u0w8.onrender.com
+        // Netlify фронтенд: https://filmkaif.netlify.app/
+        
+        // Попытка получить URL из различных источников
+        function initBackendUrl() {
+            // 1. Проверяем localStorage (сохраненное значение)
+            if (localStorage.getItem('backendUrl')) {
+                BACKEND_URL = localStorage.getItem('backendUrl');
+                console.log(`✅ Backend URL из localStorage: ${BACKEND_URL}`);
+                return;
+            }
+            
+            // 2. Проверяем глобальную переменную (установлена Netlify)
+            if (window.BACKEND_URL) {
+                BACKEND_URL = window.BACKEND_URL;
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                console.log(`✅ Backend URL из глобальной переменной: ${BACKEND_URL}`);
+                return;
+            }
+            
+            // 3. Для локального host - используем localhost
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                BACKEND_URL = 'http://localhost:3000';
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                console.log(`✅ Backend URL для локального хоста: ${BACKEND_URL}`);
+                return;
+            }
+            
+            // 4. Для production Netlify - используем Render URL по умолчанию
+            if (window.location.hostname === 'filmkaif.netlify.app') {
+                BACKEND_URL = 'https://cinemate-server-u0w8.onrender.com';
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                console.log(`✅ Backend URL для production: ${BACKEND_URL}`);
+                return;
+            }
+            
+            // 5. Просим пользователя ввести URL (для других случаев)
+            const savedUrl = prompt(
+                'Приложение развернуто, но нужен адрес бэкенда.\n\n' +
+                'Введите URL bэкэнда (например: https://cinemate-server-u0w8.onrender.com):\n\n' +
+                'Этот URL будет сохранен в localStorage',
+                'https://cinemate-server-u0w8.onrender.com'
+            );
+            
+            if (savedUrl) {
+                BACKEND_URL = savedUrl.trim();
+                if (!BACKEND_URL.startsWith('http')) {
+                    BACKEND_URL = 'https://' + BACKEND_URL;
+                }
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                console.log(`✅ Backend URL сохранен: ${BACKEND_URL}`);
+                alert(`✅ URL сохранен: ${BACKEND_URL}\n\nОбновите страницу для применения`);
+            } else {
+                BACKEND_URL = 'https://cinemate-server-u0w8.onrender.com'; // Fallback
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                console.warn(`⚠️ Используется fallback: ${BACKEND_URL}`);
+            }
+        }
+        
+        // Инициализируем URL
+        initBackendUrl();
+        
+        // Добавляем кнопку для смены URL (Debug)
+        window.changeBackendUrl = function() {
+            const newUrl = prompt('Введите новый адрес бэкенда:', BACKEND_URL);
+            if (newUrl) {
+                BACKEND_URL = newUrl;
+                localStorage.setItem('backendUrl', BACKEND_URL);
+                alert('URL изменен! Обновите страницу');
+                location.reload();
+            }
+        };
+        
+        console.log(`🌐 Подключение к бэкенду: ${BACKEND_URL}`);
+
         // ==================== SOCKET.IO ИНИЦИАЛИЗАЦИЯ ====================
-        const socket = io(location.origin, {
+        const socket = io(BACKEND_URL, {
             reconnection: true,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
@@ -1112,7 +1194,7 @@ socket.io.on("reconnect_failed", () => {
                 // Если нет - запрашиваем через API
                 try {
                     addSystemMessage('🔁 Запрашиваю у сервера прямую ссылку...');
-                    const resp = await fetch('/api/extract', {
+                    const resp = await fetch(`${BACKEND_URL}/api/extract`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ url: url })
@@ -1139,7 +1221,7 @@ socket.io.on("reconnect_failed", () => {
                     // Последний шанс - через прокси
                     videoData = {
                         type: 'direct',
-                        url: `/stream?url=${encodeURIComponent(url)}`,
+                        url: `${BACKEND_URL}/stream?url=${encodeURIComponent(url)}`,
                         title: title || 'Видео (через прокси)',
                         originalUrl: url,
                         useProxy: true
@@ -1372,7 +1454,7 @@ socket.io.on("reconnect_failed", () => {
                 if (!videoData || videoData.type === 'embed') {
                     try {
                         addSystemMessage('🔁 Запрашиваю у сервера прямую ссылку (yt-dlp)...');
-                        const resp = await fetch('/api/extract', {
+                        const resp = await fetch(`${BACKEND_URL}/api/extract`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ url })
@@ -1477,7 +1559,7 @@ socket.io.on("reconnect_failed", () => {
                         console.log('📺 Прямой URL не работает, переключаюсь на серверный прокси');
                         addSystemMessage('📺 Переключение на прокси-стриминг...');
                         state.currentVideoData.proxyOn = true;
-                        const proxyUrl = `/stream?url=${encodeURIComponent(state.currentVideoData.originalUrl)}`;
+                        const proxyUrl = `${BACKEND_URL}/stream?url=${encodeURIComponent(state.currentVideoData.originalUrl)}`;
                         video.src = proxyUrl;
                         try {
                             video.load();
@@ -1569,7 +1651,7 @@ socket.io.on("reconnect_failed", () => {
                     if (!tried && orig) {
                         console.warn('Direct playback failed, switching to proxy...');
                         video.dataset.proxyTried = 'true';
-                        const proxyUrl = '/stream?url=' + encodeURIComponent(orig);
+                        const proxyUrl = `${BACKEND_URL}/stream?url=` + encodeURIComponent(orig);
                         video.src = proxyUrl;
                         video.load();
                         video.play().catch(()=>{});
