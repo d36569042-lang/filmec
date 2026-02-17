@@ -85,9 +85,11 @@ class Room {
             isPlaying: false,
             currentTime: 0,
             lastUpdateTime: Date.now(),
+            serverTime: Date.now(), // НОВОЕ: Время на сервере когда было обновление
             url: null,
             title: 'Нет видео',
-            type: null
+            type: null,
+            commandId: 0 // НОВОЕ: Порядковый номер команды
         };
     }
 
@@ -190,7 +192,7 @@ app.post('/api/extract', async (req, res) => {
         }
 
         // Специальная обработка для VK
-        if (url.includes('vk.com') || url.includes('vkontakte.ru')) {
+        if (url.includes('vk.com') || url.includes('vkvideo.ru')) {
             return res.json({
                 url: url,
                 title: 'VK видео',
@@ -235,7 +237,6 @@ app.post('/api/extract', async (req, res) => {
         }
     }
 });
-
 
 // ============= STREAM PROXY (с SSRF защитой и поддержкой Range) =============
 // ============= УЛУЧШЕННЫЙ STREAM PROXY =============
@@ -365,16 +366,69 @@ app.post('/api/rutube', async (req, res) => {
     }
 });
 
-// ============= VK API =============
-app.post('/api/vk', (req, res) => {
-    const { oid, id } = req.body;
-    if (!oid || !id) return res.status(400).json({ error: 'missing_params' });
+// ============= VK API - УЛУЧШЕННАЯ ОБРАБОТКА =============
+app.post('/api/vk', async (req, res) => {
+    const { url } = req.body;
+    
+    if (!url) {
+        return res.status(400).json({ 
+            error: 'missing_url',
+            message: 'Требуется URL видео ВК'
+        });
+    }
 
-    res.json({
-        url: `https://vk.com/video_ext.php?oid=${oid}&id=${id}&autoplay=1`,
-        title: 'VK видео',
-        type: 'embed'
-    });
+    console.log(`🔍 Обрабатываю ВК видео: ${url}`);
+
+    try {
+        // Парсим ВК URL для получения ID видео
+        let videoId = null;
+        let ownerId = null;
+        
+        // Вариант 1: https://vkvideo.ru/video-127401043_456252809
+        const vkvideomatch = url.match(/vkvideo\.ru\/video-(\d+)_(\d+)/);
+        if (vkvideomatch) {
+            ownerId = vkvideomatch[1];
+            videoId = vkvideomatch[2];
+        }
+        
+        // Вариант 2: https://vk.com/video{oid}_{id}
+        const vkmatch = url.match(/vk\.com\/video(-?\d+)_(\d+)/);
+        if (vkmatch) {
+            ownerId = vkmatch[1];
+            videoId = vkmatch[2];
+        }
+        
+        if (!videoId || !ownerId) {
+            console.warn('❌ Не удалось распарсить ВК видео ID');
+            return res.json({
+                url: url,
+                title: 'ВК видео',
+                type: 'vk-embed', // Специальный тип для ВК
+                videoId: 'unknown'
+            });
+        }
+        
+        console.log(`✅ ВК видео ID: ${ownerId}_${videoId}`);
+        
+        // Возвращаем информацию о ВК видео
+        return res.json({
+            url: url,
+            title: 'ВК видео',
+            type: 'vk-direct', // Прямой тип для ВК (без iframe)
+            videoId: `${ownerId}_${videoId}`,
+            ownerId: ownerId,
+            embedUrl: `https://vk.com/video_ext.php?oid=${ownerId}&id=${videoId}&autoplay=1`
+        });
+        
+    } catch (error) {
+        console.error('❌ VK обработка ошибка:', error.message);
+        return res.json({
+            url: url,
+            title: 'ВК видео',
+            type: 'vk-embed',
+            error: 'vk_parsing_failed'
+        });
+    }
 });
 
 // ============= SOCKET.IO ОБРАБОТЧИКИ =============
@@ -411,22 +465,31 @@ io.on('connection', (socket) => {
                 message: `${username} присоединился`
             });
 
-            // Периодическая синхронизация
+            // ИСПРАВЛЕНИЕ: Правильная синхронизация
+            // Периодическая синхронизация ТОЛЬКО для зрителей
             const syncInterval = setInterval(() => {
                 if (!rooms.has(roomId) || !room.participants.has(socket.id)) {
                     clearInterval(syncInterval);
                     return;
                 }
 
+                // ИСПРАВЛЕНИЕ: Не отправляем ведущему его же данные!
+                if (room.leaderId === socket.id) {
+                    return; // Ведущий не нуждается в sync-tick, он сам управляет
+                }
+
+                // ИСПРАВЛЕНИЕ: Правильный расчет ожидаемого времени
                 let expectedTime = room.videoState.currentTime;
                 if (room.videoState.isPlaying) {
-                    expectedTime += (Date.now() - room.videoState.lastUpdateTime) / 1000;
+                    const timePassed = (Date.now() - room.videoState.lastUpdateTime) / 1000;
+                    expectedTime += timePassed;
                 }
 
                 socket.emit('sync-tick', {
-                    serverTime: Date.now(),
                     expectedTime: expectedTime,
-                    isPlaying: room.videoState.isPlaying
+                    serverTime: Date.now(),
+                    isPlaying: room.videoState.isPlaying,
+                    commandId: room.videoState.commandId
                 });
             }, 1000);
 
@@ -448,29 +511,58 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // ИСПРАВЛЕНИЕ: Правильный расчет состояния видео
         if (data.action === 'load') {
+            const now = Date.now();
             room.videoState = {
-                ...room.videoState,
                 url: data.url,
                 title: data.title || 'Видео',
                 type: data.type || 'direct',
-                currentTime: 0,
                 isPlaying: false,
-                lastUpdateTime: Date.now()
+                currentTime: 0,
+                lastUpdateTime: now,  // ИСПРАВЛЕНИЕ: Обновляем ДО остального
+                serverTime: now,
+                commandId: (room.videoState.commandId || 0) + 1
             };
-        } else {
-            room.videoState = {
-                ...room.videoState,
-                isPlaying: data.action === 'play',
-                currentTime: data.time || room.videoState.currentTime,
-                lastUpdateTime: Date.now()
-            };
+        } else if (data.action === 'play' || data.action === 'pause' || data.action === 'seek') {
+            const now = Date.now();
+            
+            // ИСПРАВЛЕНИЕ: Если приходит 'seek', сбрасываем рассчитанное время
+            if (data.action === 'seek') {
+                // Seek не должен вычисляться дальше
+                room.videoState.currentTime = data.time || room.videoState.currentTime;
+                room.videoState.isPlaying = false; // Pause после seek
+            } else if (data.action === 'play') {
+                // Если было'pause', обновляем время перед play
+                if (!room.videoState.isPlaying && typeof data.time === 'number') {
+                    room.videoState.currentTime = data.time;
+                }
+                room.videoState.isPlaying = true;
+            } else if (data.action === 'pause') {
+                // Фиксируем время в точке pause
+                room.videoState.currentTime = data.time || room.videoState.currentTime;
+                room.videoState.isPlaying = false;
+            }
+            
+            // ИСПРАВЛЕНИЕ: Обновляем время ПОСЛЕ установки всех других полей
+            room.videoState.lastUpdateTime = now;
+            room.videoState.serverTime = now;
+            room.videoState.commandId = (room.videoState.commandId || 0) + 1;
         }
 
-        io.to(currentRoomId).emit('video-sync', {
+        // Отправляем команду ВСЕМ кроме ведущего (ведущий уже знает)
+        io.to(currentRoomId).except(socket.id).emit('video-sync', {
             ...data,
             leaderId: socket.id,
-            serverTime: Date.now()
+            serverTime: Date.now(),
+            commandId: room.videoState.commandId,
+            expectedTime: room.videoState.currentTime // НОВОЕ: Отправляем ожидаемое время
+        });
+        
+        // Отправляем ведущему подтверждение
+        socket.emit('video-command-ack', {
+            commandId: room.videoState.commandId,
+            serverTimestamp: Date.now()
         });
     });
 
@@ -500,6 +592,20 @@ io.on('connection', (socket) => {
                 message: `${oldName} сменил имя на ${newUsername}`
             });
         }
+    });
+
+    // НОВОЕ: Обработка heartbeat для мягкой синхронизации embed видео (ВК)
+    socket.on('embed-video-heartbeat', ({ roomId, isAlive }) => {
+        if (!roomId || !rooms.has(roomId)) return;
+        
+        const room = rooms.get(roomId);
+        if (room.leaderId !== socket.id) return; // Прерываем если отправитель не ведущий
+        
+        // Отправляем heartbeat всем в комнате кроме ведущего
+        io.to(roomId).except(socket.id).emit('embed-video-heartbeat', {
+            isAlive: isAlive,
+            timestamp: Date.now()
+        });
     });
 
     socket.on('request-sync', ({ clientTime }) => {

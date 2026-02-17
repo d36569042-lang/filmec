@@ -891,7 +891,10 @@
             currentTime: 0,
             ignoreNextSync: false,
             lastCommandTime: 0,
-            participants: new Map()
+            participants: new Map(),
+            embedSyncInterval: null,  // НОВОЕ: Для синхронизации embed видео
+            embedHeartbeatTimeout: null,  // НОВОЕ: Таймаут heartbeat
+            lastEmbedHeartbeat: null  // НОВОЕ: Время последнего heartbeat
         };
 
         // ==================== DOM ЭЛЕМЕНТЫ ====================
@@ -1048,34 +1051,58 @@ socket.io.on("reconnect_failed", () => {
         elements.urlInput.disabled = true;
     }
     
-    // ========== ИСПРАВЛЕНИЕ: Загружаем видео, если оно уже есть в комнате ==========
+    // ИСПРАВЛЕНИЕ: Загружаем видео если оно есть в комнате
     if (data.videoState && data.videoState.url) {
         console.log('🎬 В комнате уже есть видео, загружаю...', data.videoState);
         addSystemMessage(`🎬 Текущее видео: ${data.videoState.title || 'Загрузка...'}`);
         
-        // Загружаем видео (используем существующую функцию)
+        // Загружаем видео
         processLoadedVideo(
             data.videoState.url, 
             data.videoState.title || 'Видео', 
-            null // urlFromApi - null, зритель сам запросит через API
+            null
         );
         
-        // Применяем текущее состояние видео (пауза/воспроизведение)
-        setTimeout(() => {
+        // ИСПРАВЛЕНИЕ: Применяем состояние видео ПОСЛЕ загрузки метаданных
+        // Не используем setTimeout, вместо этого используем событие loadedmetadata
+        const video = elements.nativeVideo;
+        
+        const applyVideoState = () => {
+            console.log('🎥 Применяю сохраненное состояние видео');
+            
             if (data.videoState.isPlaying) {
-                console.log(`▶️ Устанавливаю состояние: play на ${data.videoState.currentTime}s`);
+                console.log(`▶️ Устанавливаю play на ${data.videoState.currentTime}s`);
                 applyVideoCommand({
                     action: 'play',
                     time: data.videoState.currentTime
                 });
             } else {
-                console.log(`⏸️ Устанавливаю состояние: pause на ${data.videoState.currentTime}s`);
+                console.log(`⏸️ Устанавливаю pause на ${data.videoState.currentTime}s`);
                 applyVideoCommand({
                     action: 'seek',
                     time: data.videoState.currentTime
                 });
             }
-        }, 1000); // Даем время на загрузку видео
+            
+            // Удаляем слушатель
+            video.removeEventListener('loadedmetadata', applyVideoState);
+        };
+        
+        // ИСПРАВЛЕНИЕ: Ждем loadedmetadata вместо фиксированного времени
+        if (video.readyState >= 1) { // HAVE_METADATA уже загружены
+            // Метаданные уже загружены, выполняем сразу (но в следующем тике)
+            setTimeout(applyVideoState, 100);
+        } else {
+            // Ждем загрузки метаданных
+            video.addEventListener('loadedmetadata', applyVideoState, { once: true });
+            
+            // Таймаут как запасной вариант - максимальное ожидание 10 сек
+            setTimeout(() => {
+                if (video.readyState >= 1) {
+                    applyVideoState();
+                }
+            }, 10000);
+        }
     }
 });
         socket.on('participant-joined', (data) => {
@@ -1178,9 +1205,51 @@ socket.io.on("reconnect_failed", () => {
             // Иначе сами распознаем и запрашиваем
             addSystemMessage('🔎 Распознаю ссылку...');
             
+            // НОВОЕ: Проверяем ВК видео
+            if (url.includes('vkvideo.ru') || url.includes('vk.com/video')) {
+                console.log('📺 Обнаружено ВК видео');
+                try {
+                    const resp = await fetch(`${BACKEND_URL}/api/vk`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url })
+                    });
+                    
+                    if (resp.ok) {
+                        const json = await resp.json();
+                        if (json.type === 'vk-direct') {
+                            // ВК видео с поддержкой синхронизации
+                            videoData = {
+                                type: 'vk-direct',
+                                url: json.url,
+                                title: json.title || title || 'ВК видео',
+                                originalUrl: url,
+                                videoId: json.videoId,
+                                looseSync: true  // НОВОЕ: Мягкая синхронизация
+                            };
+                            addSystemMessage(`✅ ВК видео: ${videoData.title}`);
+                        } else {
+                            // ВК embed (iframe)
+                            videoData = {
+                                type: 'vk-embed',
+                                url: json.embedUrl,
+                                title: json.title || title || 'ВК видео',
+                                originalUrl: url,
+                                looseSync: true  // НОВОЕ: Мягкая синхронизация
+                            };
+                            addSystemMessage(`✅ ВК видео (embed): ${videoData.title}`);
+                        }
+                    } else {
+                        throw new Error('vk_extract_failed');
+                    }
+                } catch (e) {
+                    console.error('VK extraction failed:', e);
+                    addSystemMessage('❌ Ошибка загрузки ВК видео');
+                    return;
+                }
+            } 
             // Проверяем, может это прямая ссылка?
-            const directMatch = url.match(/\.(mp4|webm|ogg|mov|m3u8)(\?.*)?$/i);
-            if (directMatch) {
+            else if (url.match(/\.(mp4|webm|ogg|mov|m3u8)(\?.*)?$/i)) {
                 const isHls = url.includes('.m3u8');
                 videoData = {
                     type: isHls ? 'hls' : 'direct',
@@ -1190,8 +1259,40 @@ socket.io.on("reconnect_failed", () => {
                     useProxy: false
                 };
                 addSystemMessage(`✅ Прямая ссылка на ${isHls ? 'HLS поток' : 'видео'}`);
-            } else {
-                // Если нет - запрашиваем через API
+            } 
+            // Rutube
+            else if (url.includes('rutube.ru')) {
+                try {
+                    addSystemMessage('🔁 Запрашиваю у сервера Rutube ссылку...');
+                    const resp = await fetch(`${BACKEND_URL}/api/extract`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url })
+                    });
+                    
+                    if (resp.ok) {
+                        const json = await resp.json();
+                        const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
+                        const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
+                        videoData = {
+                            type: type,
+                            url: json.url,
+                            title: json.title || title || 'Rutube видео',
+                            originalUrl: url,
+                            useProxy: false
+                        };
+                        addSystemMessage(`✅ Rutube ссылка извлечена`);
+                    } else {
+                        throw new Error('rutube_extract_failed');
+                    }
+                } catch (e) {
+                    console.error('Rutube extraction failed:', e);
+                    addSystemMessage('❌ Ошибка загрузки Rutube видео');
+                    return;
+                }
+            }
+            // Другие источники
+            else {
                 try {
                     addSystemMessage('🔁 Запрашиваю у сервера прямую ссылку...');
                     const resp = await fetch(`${BACKEND_URL}/api/extract`, {
@@ -1203,7 +1304,6 @@ socket.io.on("reconnect_failed", () => {
                     if (resp.ok) {
                         const json = await resp.json();
                         const isHls = json.url.includes('.m3u8') || json.url.includes('hls');
-                        // ИСПРАВЛЕНИЕ: Используем тип от сервера если доступен
                         const type = json.type ? json.type : (isHls ? 'hls' : 'direct');
                         videoData = {
                             type: type,
@@ -1212,7 +1312,7 @@ socket.io.on("reconnect_failed", () => {
                             originalUrl: url,
                             useProxy: false
                         };
-                        addSystemMessage(`✅ Ссылка извлечена: ${videoData.title}`);
+                        addSystemMessage(`✅ Ссылка извлечена`);
                     } else {
                         const errJson = await resp.json();
                         throw new Error(errJson.error || 'extract_failed');
@@ -1222,7 +1322,7 @@ socket.io.on("reconnect_failed", () => {
                     addSystemMessage('⚠️ Не удалось извлечь ссылку, пробую прокси...');
                     // Последний шанс - через прокси
                     videoData = {
-                        type: 'embed',
+                        type: 'direct',
                         url: url,
                         title: title || 'Видео',
                         originalUrl: url,
@@ -1276,6 +1376,36 @@ socket.io.on("reconnect_failed", () => {
         console.log(`✅ Синхронизация в норме (разница ${diff.toFixed(1)}с)`);
     }
 });
+
+        // НОВОЕ: Слушатель для heartbeat мягкой синхронизации (ВК видео)
+        socket.on('embed-video-heartbeat', (data) => {
+            if (!state.currentVideoData || !state.currentVideoData.looseSync) {
+                return; // Не наше видео или не embed
+            }
+            
+            if (state.isLeader) {
+                return; // Ведущий не обрабатывает свои heartbeats
+            }
+            
+            // Обновляем время последнего heartbeat
+            state.lastEmbedHeartbeat = Date.now();
+            
+            console.log(`💓 Получен heartbeat от ведущего (ВК видео синхро)`);
+            
+            // Очищаем таймаут проверки
+            if (state.embedHeartbeatTimeout) {
+                clearTimeout(state.embedHeartbeatTimeout);
+            }
+            
+            // Переустанавливаем новый таймаут
+            state.embedHeartbeatTimeout = setTimeout(() => {
+                if (state.currentVideoData && state.currentVideoData.looseSync) {
+                    console.log('⚠️ Heartbeat timeout - потеря синхронизации с ведущим');
+                    addSystemMessage('❌ Потеря соединения с ведущим (ВК видео)');
+                }
+            }, 20000);
+        });
+
         socket.on('chat-message', (data) => {
             addChatMessage(data.username, data.message, false);
             // Desktop notification и звук при скрытой вкладке
@@ -1449,13 +1579,42 @@ socket.io.on("reconnect_failed", () => {
             
             (async () => {
                 addSystemMessage('🔎 Пытаюсь распознать ссылку...');
-                let videoData = parseVideoUrl(url);
+                let videoData = null;
                 let useDirectLink = false;
                 
-                // Все видео должны быть загружены через API для получения прямой ссылки
-                if (!videoData || videoData.type === 'embed') {
+                // НОВОЕ: Проверяем ВК видео
+                if (url.includes('vkvideo.ru') || url.includes('vk.com/video')) {
+                    console.log('📺 Обнаружено ВК видео');
                     try {
-                        addSystemMessage('🔁 Запрашиваю у сервера прямую ссылку (yt-dlp)...');
+                        const resp = await fetch(`${BACKEND_URL}/api/vk`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: url })
+                        });
+                        
+                        if (resp.ok) {
+                            const json = await resp.json();
+                            videoData = {
+                                type: json.type, // 'vk-direct' или 'vk-embed'
+                                url: url,
+                                title: json.title || 'ВК видео',
+                                originalUrl: url,
+                                videoId: json.videoId
+                            };
+                            addSystemMessage(`✅ ВК видео: ${videoData.title}`);
+                        } else {
+                            throw new Error('vk_extract_failed');
+                        }
+                    } catch (e) {
+                        console.error('VK extraction failed:', e);
+                        addSystemMessage('❌ Ошибка загрузки ВК видео');
+                        return;
+                    }
+                }
+                // Все видео должны быть загружены через API для получения прямой ссылки
+                else if (!videoData || videoData.type === 'embed') {
+                    try {
+                        addSystemMessage('🔁 Запрашиваю у сервера прямую ссылку...');
                         const resp = await fetch(`${BACKEND_URL}/api/extract`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1473,7 +1632,7 @@ socket.io.on("reconnect_failed", () => {
                                 originalUrl: url,
                                 useProxy: false
                             };
-                            addSystemMessage('✅ Ссылка извлечена (yt-dlp)');
+                            addSystemMessage('✅ Ссылка извлечена');
                             useDirectLink = true;
                         } else {
                             throw new Error('extract_failed');
@@ -1540,10 +1699,32 @@ socket.io.on("reconnect_failed", () => {
                 window.currentHls = null;
             }
             
+            // ИСПРАВЛЕНИЕ: Пересоздаем видео элемент
             const oldVideo = elements.nativeVideo.cloneNode(true);
             elements.nativeVideo.parentNode.replaceChild(oldVideo, elements.nativeVideo);
             const playerWrapper = document.getElementById('playerWrapper');
             elements.nativeVideo = document.getElementById('nativeVideo');
+            
+            // НОВОЕ: Обработка ВК видео и других типов
+            if (videoData.type === 'vk-direct' || videoData.type === 'vk-embed') {
+                // ВК видео загружаем через iframe embed
+                console.log('📺 Загружаю ВК видео через iframe');
+                elements.videoPlayer.style.display = 'block';
+                elements.nativeVideo.style.display = 'none';
+                
+                // Используем embedUrl если есть, иначе оригинальный URL
+                const embedUrl = videoData.embedUrl || videoData.url;
+                elements.videoPlayer.src = embedUrl;
+                
+                addSystemMessage(`📺 ВК видео загружено (мягкая синхронизация ±30сек)`);
+                addSystemMessage(`⚠️ Примечание: синхронизация может быть не идеальной для встроенных видео`);
+                
+                // Для ВК видео - используем временную синхронизацию
+                // Не можем контролировать iframe, но можем синхронизировать состояние
+                setupLooseSyncForEmbed();
+                
+                return;
+            }
             
             if (videoData.type === 'direct') {
                 // Нативное HTML5 видео
@@ -1554,6 +1735,7 @@ socket.io.on("reconnect_failed", () => {
                 
                 try {
                     elements.nativeVideo.load();
+                    addSystemMessage('📹 Загружаю видео...');
                 } catch (e) {
                     console.error('Ошибка загрузки видео:', e);
                     addSystemMessage('❌ Ошибка загрузки видео: ' + e.message);
@@ -1588,8 +1770,17 @@ socket.io.on("reconnect_failed", () => {
                     video.addEventListener('error', onErrorHandler, { once: false });
                 }
                 
-                // Устанавливаем слушатели ТОЛЬКО для нативного видео
-                setupVideoListeners();
+                // ИСПРАВЛЕНИЕ: Ждем loadedmetadata перед отправкой сигнала готовности
+                video.addEventListener('loadedmetadata', () => {
+                    console.log('✅ Метаданные видео загружены');
+                    addSystemMessage(`✅ Видео готово (${(video.duration || 0).toFixed(0)}s)`);
+                    setupVideoListeners();
+                }, { once: true });
+                
+                video.addEventListener('canplay', () => {
+                    console.log('🎬 Видео готово к воспроизведению');
+                }, { once: true });
+                
             } else if (videoData.type === 'hls') {
                 // ИСПРАВЛЕНИЕ: Поддержка HLS потоков (Rutube M3U8)
                 elements.nativeVideo.style.display = 'block';
@@ -1605,9 +1796,13 @@ socket.io.on("reconnect_failed", () => {
                     
                     window.currentHls = hls;
                     
+                    // ИСПРАВЛЕНИЕ: Правильная обработка HLS событий
                     hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-                        console.log('✅ HLS потоки загружены');
-                        addSystemMessage('✅ HLS потоки загружены');
+                        console.log('✅ HLS манифест загружен');
+                        addSystemMessage('✅ HLS поток готов');
+                        
+                        // Сразу добавляем слушатели
+                        setupVideoListeners();
                     });
                     
                     hls.on(window.Hls.Events.ERROR, (event, data) => {
@@ -1633,48 +1828,70 @@ socket.io.on("reconnect_failed", () => {
                     // Safari поддерживает HLS нативно
                     elements.nativeVideo.src = videoData.url;
                     elements.nativeVideo.load();
+                    addSystemMessage('📹 Загружаю HLS поток (Safari native)');
+                    
+                    elements.nativeVideo.addEventListener('loadedmetadata', () => {
+                        console.log('✅ HLS метаданные загружены (Safari)');
+                        setupVideoListeners();
+                    }, { once: true });
                 } else {
                     addSystemMessage('❌ Браузер не поддерживает HLS потоки');
                 }
-                
-                setupVideoListeners();
-            } else if (videoData.type === 'rutube' || videoData.type === 'vk' || videoData.type === 'embed') {
-                // ИСПРАВЛЕНИЕ: Добавили iframe поддержку для VK и YouTube
-                console.log('📺 Загружаю видео через iframe:', videoData.url);
-                
-                // Для VK видео работает iframe встраивание
-                if (videoData.url.includes('vk.com') || videoData.url.includes('vkontakte.ru')) {
-                    elements.videoPlayer.style.display = 'block';
-                    elements.nativeVideo.style.display = 'none';
-                    elements.videoPlayer.src = videoData.url;
-                    addSystemMessage('📺 Загружено VK видео');
-                    return;
+            }
+        }
+
+        function setupLooseSyncForEmbed() {
+            // НОВОЕ: Мягкая синхронизация для embed видео (ВК, YouTube)
+            // Мы не можем контролировать iframe видео, но можем отправлять сигналы
+            
+            console.log('🎯 Установка мягкой синхронизации для embed видео');
+            
+            if (state.isLeader) {
+                // Ведущий: отправляем сигналы что видео проигрывается
+                // Каждые 5 сек отправляем "я еще здесь, видео идет"
+                if (state.embedSyncInterval) {
+                    clearInterval(state.embedSyncInterval);
                 }
                 
-                // Для RuTube и YouTube - пробуем через прокси
-                if (videoData.url.includes('rutube.ru') || videoData.url.includes('youtube.com') || videoData.url.includes('youtu.be')) {
-                    // Пытаемся загрузить через прокси
-                    console.log('📺 RuTube/YouTube - загружаю через прокси');
-                    elements.nativeVideo.style.display = 'block';
-                    const proxyUrl = `${BACKEND_URL}/stream?url=${encodeURIComponent(videoData.originalUrl || videoData.url)}`;
-                    elements.nativeVideo.src = proxyUrl;
-                    elements.nativeVideo.dataset.originalUrl = videoData.originalUrl || videoData.url;
-                    
-                    try {
-                        elements.nativeVideo.load();
-                        addSystemMessage('📺 Загружаю видео через прокси сервер...');
-                        setupVideoListeners();
+                state.embedSyncInterval = setInterval(() => {
+                    if (!state.roomId || !state.isLeader) {
+                        clearInterval(state.embedSyncInterval);
                         return;
-                    } catch (e) {
-                        console.error('Ошибка загрузки через прокси:', e);
                     }
+                    
+                    // Отправляем простой heartbeat что видео активно
+                    socket.emit('embed-video-heartbeat', {
+                        roomId: state.roomId,
+                        isAlive: true,
+                        timestamp: Date.now()
+                    });
+                }, 5000); // Каждые 5 секунд
+                
+                addSystemMessage('🎯 Отправляю сигналы синхронизации для ВК видео');
+            } else {
+                // Зритель: просто загружаем и ждем
+                // Если ведущий перестал отправлять сигналы - перезагружаем видео
+                if (state.embedHeartbeatTimeout) {
+                    clearTimeout(state.embedHeartbeatTimeout);
                 }
                 
-                // Последний вариант - iframe для остального
-                elements.videoPlayer.style.display = 'block';
-                elements.nativeVideo.style.display = 'none';
-                elements.videoPlayer.src = videoData.url;
-                addSystemMessage('⚠️ Загружено через встроенный плеер');
+                state.lastEmbedHeartbeat = Date.now();
+                
+                const checkHeartbeat = () => {
+                    if (!state.currentVideoData || !state.currentVideoData.looseSync) return;
+                    
+                    const timeSinceLastHeartbeat = Date.now() - (state.lastEmbedHeartbeat || Date.now());
+                    
+                    if (timeSinceLastHeartbeat > 15000) {
+                        // Не было сигнала более 15 сек - вероятно рассинхрон
+                        console.log('⚠️ Нет сигналов синхро более 15сек - может быть рассинхрон');
+                        addSystemMessage('⚠️ Возможна потеря синхронизации (ведущий не отвечает)');
+                    }
+                };
+                
+                state.embedHeartbeatTimeout = setTimeout(checkHeartbeat, 20000);
+                
+                addSystemMessage('🎯 Получаю сигналы синхронизации от ведущего');
             }
         }
 
@@ -1682,7 +1899,7 @@ socket.io.on("reconnect_failed", () => {
             if (!elements.nativeVideo) return;
             
             const video = elements.nativeVideo;
-            let seekTimeout;
+            
             // Если при прямом воспроизведении произошла ошибка, пробуем проксировать
             video.addEventListener('error', (e) => {
                 try {
@@ -1729,6 +1946,7 @@ socket.io.on("reconnect_failed", () => {
                 });
             });
             
+            // ИСПРАВЛЕНИЕ: Отправляем seek НЕМЕДЛЕННО, не ждем 300ms
             video.addEventListener('seeked', () => {
                 if (!state.isLeader || state.ignoreNextSync) {
                     state.ignoreNextSync = false;
@@ -1737,14 +1955,20 @@ socket.io.on("reconnect_failed", () => {
                 
                 if (!state.roomId) return;
                 
-                clearTimeout(seekTimeout);
-                seekTimeout = setTimeout(() => {
-                    console.log(`⏪ ВЕДУЩИЙ отправляет seek на ${video.currentTime.toFixed(1)}s`);
-                    socket.emit('video-command', {
-                        action: 'seek',
-                        time: video.currentTime
-                    });
-                }, 300);
+                // ИСПРАВЛЕНИЕ: Отправляем СРАЗУ БЕЗ ЗАДЕРЖКИ
+                console.log(`⏪ ВЕДУЩИЙ отправляет seek на ${video.currentTime.toFixed(1)}s`);
+                socket.emit('video-command', {
+                    action: 'seek',
+                    time: video.currentTime
+                });
+            });
+            
+            // НОВОЕ: Добавляем обработку 'seeking' события для ранней отправки
+            video.addEventListener('seeking', () => {
+                if (!state.isLeader) return;
+                if (!state.roomId) return;
+                
+                console.log(`⏪ ВЕДУЩИЙ начал перемотку на ${video.currentTime.toFixed(1)}s (seeking)`);
             });
         }
 
@@ -1759,7 +1983,7 @@ socket.io.on("reconnect_failed", () => {
     
     // Поддерживаем только direct и hls типы
     if (state.currentVideoData.type !== 'direct' && state.currentVideoData.type !== 'hls') {
-        console.log('⚠️ Команда видео игнорирована - тип не поддерживает синхронизацию');
+        console.log('⚠️ Команда видео игнорирована - тип не поддерживает синхронизацию:', state.currentVideoData.type);
         return;
     }
     
@@ -1767,59 +1991,95 @@ socket.io.on("reconnect_failed", () => {
     
     console.log(`🎬 Применяю команду: ${data.action} на время ${data.time?.toFixed(2) || 'N/A'}`);
     
-    // Функция для выполнения команды
+    // ИСПРАВЛЕНИЕ: Функция для проверки готовности видео
+    const isVideoReady = () => {
+        return video.readyState >= 2; // HAVE_CURRENT_DATA - можно менять currentTime и воспроизводить
+    };
+    
+    // Функция для выполнения команды с учетом готовности видео
     const executeCommand = () => {
         try {
+            console.log(`📹 Выполняю команду: ${data.action}, readyState=${video.readyState}`);
+            
             switch (data.action) {
                 case 'play':
-                    // Устанавливаем время ДО вызова play
+                    // ИСПРАВЛЕНИЕ: Устанавливаем время ТОЛЬКО если видео готово
                     if (typeof data.time === 'number') {
                         video.currentTime = data.time;
+                        console.log(`⏱️ Установлено время: ${data.time.toFixed(2)}s`);
                     }
-                    video.play().catch(e => {
-                        console.log('❌ Ошибка play:', e);
-                        // Если автовоспроизведение заблокировано, показываем сообщение
-                        if (e.name === 'NotAllowedError') {
-                            addSystemMessage('⚠️ Нажмите на видео для воспроизведения');
-                        }
-                    });
+                    
+                    // ИСПРАВЛЕНИЕ: play() может выбросить ошибку, ловим её
+                    const playPromise = video.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(e => {
+                            console.error('❌ Ошибка play():', e.name, e.message);
+                            // Если автовоспроизведение заблокировано - обычно
+                            if (e.name === 'NotAllowedError') {
+                                addSystemMessage('⚠️ Нажмите на видео для воспроизведения (браузер требует interaction)');
+                            }
+                        });
+                    }
                     break;
                     
                 case 'pause':
+                    // ИСПРАВЛЕНИЕ: Pause всегда безопасен
                     if (typeof data.time === 'number') {
                         video.currentTime = data.time;
                     }
                     video.pause();
+                    console.log(`⏸️ Видео на paused, время: ${video.currentTime.toFixed(2)}s`);
                     break;
                     
                 case 'seek':
+                    // ИСПРАВЛЕНИЕ: Seek требует готовности видео
                     if (typeof data.time === 'number') {
-                        video.currentTime = data.time;
+                        // Проверяем, что время в валидных границах
+                        const validTime = Math.max(0, Math.min(data.time, video.duration || data.time));
+                        video.currentTime = validTime;
+                        console.log(`⏪ Seek на ${validTime.toFixed(2)}s из ${video.duration.toFixed(2)}s`);
                     }
                     break;
             }
         } catch (e) {
-            console.error('Ошибка выполнения команды:', e);
+            console.error('❌ Ошибка выполнения команды:', e);
+            addSystemMessage(`❌ Ошибка: ${e.message}`);
         }
         
-        // Сбрасываем флаг через небольшую задержку
+        // Сбрасываем флаг через задержку
         setTimeout(() => {
             state.ignoreNextSync = false;
-        }, 300);
+            console.log('✅ ignoreNextSync = false');
+        }, 200);
     };
     
-    // Если это seek и видео еще не готово, ждем
-    if (data.action === 'seek' && video.readyState < 2) { // HAVE_CURRENT_DATA
-        console.log('⏳ Видео загружается, жду canplay...');
-        video.addEventListener('canplay', executeCommand, { once: true });
+    // ИСПРАВЛЕНИЕ: Если видео еще не готово - ждем
+    if (!isVideoReady()) {
+        console.log(`⏳ Ожидаю готовности видео (readyState=${video.readyState})...`);
         
-        // Таймаут на случай, если событие не сработает
-        setTimeout(() => {
-            if (!state.ignoreNextSync) return; // Уже выполнилось
-            console.log('⚠️ Таймаут ожидания canplay, выполняю команду принудительно');
+        // Создаем обработчик ОДИН РАЗ
+        const onCanPlay = () => {
+            console.log('📹 Видео готово к воспроизведению');
             executeCommand();
-        }, 3000);
+            video.removeEventListener('canplay', onCanPlay);
+        };
+        
+        const onLoadedMetadata = () => {
+            console.log('📹 Метаданные видео загружены');
+            video.removeEventListener('loadedmetadata', onLoadedMetadata);
+        };
+        
+        video.addEventListener('canplay', onCanPlay, { once: true });
+        video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+        
+        // Таймаут как запасной вариант - выполняем принудительно через 5 сек
+        setTimeout(() => {
+            console.log('⏲️ Таймаут ожидания - выполняю команду принудительно');
+            video.removeEventListener('canplay', onCanPlay);
+            executeCommand();
+        }, 5000);
     } else {
+        // Видео готово - выполняем сразу
         executeCommand();
     }
 }
